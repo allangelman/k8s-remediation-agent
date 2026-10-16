@@ -42,8 +42,18 @@ make argocd-ui # ArgoCD UI at http://localhost:8080
 make down      # delete the cluster
 ```
 
-ArgoCD syncs `apps/demo-app/` from the `main` branch on GitHub. The cluster is
-named `remediation` (override with `CLUSTER=<name>`).
+Break things and recover:
+
+```sh
+make break-image  # fault 1: bad image tag → ImagePullBackOff, app Degraded
+make reset        # undo any fault and wait for Healthy
+```
+
+ArgoCD deploys `apps/demo-app/` from the **`demo-env`** branch, not `main`.
+`demo-env` acts as the environment: fault scripts push bad commits to it, and
+the agent fixes it. `main` only changes through PRs. `make up` and `make reset`
+force-reset `demo-env` to match `main`. The cluster is named `remediation`
+(override with `CLUSTER=<name>`).
 
 ## License
 

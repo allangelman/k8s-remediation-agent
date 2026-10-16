@@ -1,4 +1,9 @@
-# ArgoCD Application that syncs apps/demo-app/ from this repo's main branch.
+# ArgoCD Application that syncs apps/demo-app/ from this repo.
+#
+# It tracks the demo-env branch, not main. demo-env is the "environment": fault
+# scripts push bad commits to it and the agent fixes it, while main stays
+# protected and only changes through PRs. `make up` and `make reset` reset
+# demo-env to match main.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -8,7 +13,7 @@ spec:
   project: default
   source:
     repoURL: https://github.com/allangelman/k8s-remediation-agent.git
-    targetRevision: main
+    targetRevision: demo-env
     path: apps/demo-app
   destination:
     server: https://kubernetes.default.svc

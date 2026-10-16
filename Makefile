@@ -4,11 +4,13 @@
 CLUSTER        ?= remediation
 CONTEXT        := kind-$(CLUSTER)
 ARGOCD_VERSION := v3.5.5
+# Branch ArgoCD deploys from; see infra/argocd-app.yaml.
+ENV_BRANCH     := demo-env
 
 # Always target the kind cluster explicitly, never whatever context is current.
 KUBECTL := kubectl --context $(CONTEXT)
 
-.PHONY: help build test up down status argocd-ui cluster argocd app wait
+.PHONY: help build test up down reset status argocd-ui break-image cluster argocd env-branch app refresh
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-12s %s\n", $$1, $$2}'
@@ -19,11 +21,14 @@ build: ## Build the agent binary into bin/
 test: ## Run Go tests
 	go test ./...
 
-up: cluster argocd app wait ## Create the cluster, install ArgoCD, and deploy the demo app
-	@echo "Ready: demo-app is Synced and Healthy."
+up: cluster argocd env-branch app refresh ## Create the cluster, install ArgoCD, and deploy the demo app
+	@CONTEXT=$(CONTEXT) infra/wait-for-app.sh Healthy
 
 down: ## Delete the kind cluster
 	kind delete cluster --name $(CLUSTER)
+
+reset: env-branch refresh ## Undo any fault: reset demo-env to main and wait for Healthy
+	@CONTEXT=$(CONTEXT) infra/wait-for-app.sh Healthy
 
 status: ## Show the ArgoCD app state and demo pods
 	@$(KUBECTL) -n argocd get application demo-app \
@@ -36,6 +41,11 @@ argocd-ui: ## Port-forward the ArgoCD UI to http://localhost:8080 and print the 
 	@echo "Password: $$($(KUBECTL) -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d)"
 	@echo "Open http://localhost:8080. Ctrl-C to stop."
 	$(KUBECTL) -n argocd port-forward svc/argocd-server 8080:80
+
+break-image: ## Fault 1: push a nonexistent image tag (ImagePullBackOff)
+	@ENV_BRANCH=$(ENV_BRANCH) faults/bad-image-tag.sh
+	@$(MAKE) --no-print-directory refresh
+	@CONTEXT=$(CONTEXT) infra/wait-for-app.sh Degraded
 
 cluster:
 	@if kind get clusters | grep -qx $(CLUSTER); then \
@@ -68,16 +78,14 @@ argocd:
 	$(KUBECTL) -n argocd rollout status deploy/argocd-repo-server --timeout=300s
 	$(KUBECTL) -n argocd rollout status statefulset/argocd-application-controller --timeout=300s
 
+# Force-push main to demo-env, discarding any fault commits on it.
+env-branch:
+	git fetch -q origin main
+	git push -q --force origin origin/main:refs/heads/$(ENV_BRANCH)
+
 app:
 	$(KUBECTL) apply -f infra/argocd-app.yaml
 
-wait:
-	@echo "Waiting for demo-app to be Synced and Healthy..."
-	@for i in $$(seq 1 60); do \
-		sync=$$($(KUBECTL) -n argocd get application demo-app -o jsonpath='{.status.sync.status}'); \
-		health=$$($(KUBECTL) -n argocd get application demo-app -o jsonpath='{.status.health.status}'); \
-		if [ "$$sync" = "Synced" ] && [ "$$health" = "Healthy" ]; then exit 0; fi; \
-		echo "  sync=$${sync:-unknown} health=$${health:-unknown}"; \
-		sleep 5; \
-	done; \
-	echo "Timed out waiting for demo-app. Run 'make status' to investigate."; exit 1
+# ArgoCD polls Git every 3 minutes; ask it to check now.
+refresh:
+	@$(KUBECTL) -n argocd annotate application demo-app argocd.argoproj.io/refresh=normal --overwrite >/dev/null
