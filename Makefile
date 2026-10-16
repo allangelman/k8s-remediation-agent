@@ -4,9 +4,6 @@
 CLUSTER        ?= remediation
 CONTEXT        := kind-$(CLUSTER)
 ARGOCD_VERSION := v3.5.5
-# Branch ArgoCD syncs from. Defaults to the current branch so PR branches can be
-# tested before merging; the branch must be pushed to GitHub.
-REVISION       ?= $(shell git rev-parse --abbrev-ref HEAD)
 
 # Always target the kind cluster explicitly, never whatever context is current.
 KUBECTL := kubectl --context $(CONTEXT)
@@ -23,7 +20,7 @@ test: ## Run Go tests
 	go test ./...
 
 up: cluster argocd app wait ## Create the cluster, install ArgoCD, and deploy the demo app
-	@echo "Ready: demo-app is Synced and Healthy (tracking branch '$(REVISION)')."
+	@echo "Ready: demo-app is Synced and Healthy."
 
 down: ## Delete the kind cluster
 	kind delete cluster --name $(CLUSTER)
@@ -72,9 +69,7 @@ argocd:
 	$(KUBECTL) -n argocd rollout status statefulset/argocd-application-controller --timeout=300s
 
 app:
-	@git ls-remote --exit-code --heads origin $(REVISION) >/dev/null || \
-		{ echo "Branch '$(REVISION)' is not on GitHub; push it first (ArgoCD syncs from GitHub)."; exit 1; }
-	sed 's|__REVISION__|$(REVISION)|' infra/argocd-app.yaml | $(KUBECTL) apply -f -
+	$(KUBECTL) apply -f infra/argocd-app.yaml
 
 wait:
 	@echo "Waiting for demo-app to be Synced and Healthy..."

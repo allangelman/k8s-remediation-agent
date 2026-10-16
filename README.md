@@ -42,9 +42,8 @@ make argocd-ui # ArgoCD UI at http://localhost:8080
 make down      # delete the cluster
 ```
 
-ArgoCD syncs `apps/demo-app/` from GitHub, tracking your current branch by
-default (override with `REVISION=<branch>`). The cluster is named `remediation`
-(override with `CLUSTER=<name>`).
+ArgoCD syncs `apps/demo-app/` from the `main` branch on GitHub. The cluster is
+named `remediation` (override with `CLUSTER=<name>`).
 
 ## License
 
