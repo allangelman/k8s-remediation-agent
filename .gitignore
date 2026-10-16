@@ -1,0 +1,20 @@
+# Build output
+/bin/
+
+# Go
+*.test
+*.out
+coverage.*
+
+# Agent runtime output
+*.jsonl
+evals/results/
+
+# Local secrets
+.env
+*.kubeconfig
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
