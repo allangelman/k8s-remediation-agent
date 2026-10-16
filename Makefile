@@ -22,13 +22,13 @@ test: ## Run Go tests
 	go test ./...
 
 up: cluster argocd env-branch app refresh ## Create the cluster, install ArgoCD, and deploy the demo app
-	@CONTEXT=$(CONTEXT) infra/wait-for-app.sh Healthy
+	@CONTEXT=$(CONTEXT) scripts/wait-for-app.sh Healthy
 
 down: ## Delete the kind cluster
 	kind delete cluster --name $(CLUSTER)
 
 reset: env-branch refresh ## Undo any fault: reset demo-env to main and wait for Healthy
-	@CONTEXT=$(CONTEXT) infra/wait-for-app.sh Healthy
+	@CONTEXT=$(CONTEXT) scripts/wait-for-app.sh Healthy
 
 status: ## Show the ArgoCD app state and demo pods
 	@$(KUBECTL) -n argocd get application demo-app \
@@ -45,7 +45,7 @@ argocd-ui: ## Port-forward the ArgoCD UI to http://localhost:8080 and print the 
 break-image: ## Fault 1: push a nonexistent image tag (ImagePullBackOff)
 	@ENV_BRANCH=$(ENV_BRANCH) faults/bad-image-tag.sh
 	@$(MAKE) --no-print-directory refresh
-	@CONTEXT=$(CONTEXT) infra/wait-for-app.sh Degraded
+	@CONTEXT=$(CONTEXT) scripts/wait-for-app.sh Degraded
 
 cluster:
 	@if kind get clusters | grep -qx $(CLUSTER); then \
@@ -86,6 +86,10 @@ env-branch:
 app:
 	$(KUBECTL) apply -f infra/argocd-app.yaml
 
-# ArgoCD polls Git every 3 minutes; ask it to check now.
+# ArgoCD only notices new commits when it polls the Git repo, every 3 minutes
+# by default, so a fault or reset could sit for up to 3 minutes before anything
+# happens. The refresh annotation tells ArgoCD to re-read demo-env right away and
+# compare it with the cluster; with auto-sync on, it then deploys any new commit
+# immediately. ArgoCD removes the annotation once the refresh is done.
 refresh:
 	@$(KUBECTL) -n argocd annotate application demo-app argocd.argoproj.io/refresh=normal --overwrite >/dev/null
