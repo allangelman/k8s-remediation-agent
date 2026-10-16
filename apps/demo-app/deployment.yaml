@@ -6,6 +6,9 @@ metadata:
     app: demo-app
 spec:
   replicas: 2
+  # Mark a stuck rollout as failed after 60s (default 600s), so ArgoCD reports
+  # the app Degraded quickly instead of Progressing for 10 minutes.
+  progressDeadlineSeconds: 60
   selector:
     matchLabels:
       app: demo-app

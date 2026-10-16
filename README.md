@@ -25,6 +25,7 @@ observe → LLM decides → LLM requests tool → guardrails check → execute �
 | Path         | Purpose                                                      |
 |--------------|--------------------------------------------------------------|
 | `infra/`     | kind cluster config, ArgoCD install, optional Prometheus     |
+| `scripts/`   | Shared helper scripts used by the Makefile                   |
 | `apps/`      | Sample app manifests that ArgoCD syncs from                  |
 | `faults/`    | Scripts that break the sample app in specific ways           |
 | `agent/`     | Agent loop, tools, guardrails, prompts                       |
@@ -42,8 +43,23 @@ make argocd-ui # ArgoCD UI at http://localhost:8080
 make down      # delete the cluster
 ```
 
-ArgoCD syncs `apps/demo-app/` from the `main` branch on GitHub. The cluster is
-named `remediation` (override with `CLUSTER=<name>`).
+Break things and recover:
+
+```sh
+make break-image
+make reset
+```
+
+| Target        | What it does |
+|---------------|--------------|
+| `break-image` | **Fault 1, bad image tag.** Pushes a commit to `demo-env` that points the Deployment at an image tag that doesn't exist. New pods can't pull the image (`ImagePullBackOff`), the rollout stalls while the old pods keep serving, and ArgoCD reports the app **Synced but Degraded** (~1 min). |
+| `reset`       | **Undo any fault.** Force-resets `demo-env` to match `main`, then waits until the app is Synced and Healthy again (~10 s). |
+
+ArgoCD deploys `apps/demo-app/` from the **`demo-env`** branch, not `main`.
+`demo-env` acts as the environment: fault scripts push bad commits to it, and
+the agent fixes it. `main` only changes through PRs. `make up` and `make reset`
+force-reset `demo-env` to match `main`. The cluster is named `remediation`
+(override with `CLUSTER=<name>`).
 
 ## License
 
