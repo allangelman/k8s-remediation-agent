@@ -38,7 +38,7 @@ Prerequisites: Docker, [kind](https://kind.sigs.k8s.io/), `kubectl`, Go.
 ```sh
 make up        # kind cluster + ArgoCD + demo app (~1.5 min)
 make status    # ArgoCD sync/health and demo pods
-make argocd-ui # ArgoCD UI at https://localhost:8080
+make argocd-ui # ArgoCD UI at http://localhost:8080
 make down      # delete the cluster
 ```
 
