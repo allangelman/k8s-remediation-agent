@@ -33,12 +33,18 @@ observe → LLM decides → LLM requests tool → guardrails check → execute �
 
 ## Quick start
 
+Prerequisites: Docker, [kind](https://kind.sigs.k8s.io/), `kubectl`, Go.
+
 ```sh
-make help
+make up        # kind cluster + ArgoCD + demo app (~1.5 min)
+make status    # ArgoCD sync/health and demo pods
+make argocd-ui # ArgoCD UI at https://localhost:8080
+make down      # delete the cluster
 ```
 
-Cluster setup (`make up`), fault injection, and the eval harness are coming in
-follow-up PRs.
+ArgoCD syncs `apps/demo-app/` from GitHub, tracking your current branch by
+default (override with `REVISION=<branch>`). The cluster is named `remediation`
+(override with `CLUSTER=<name>`).
 
 ## License
 
