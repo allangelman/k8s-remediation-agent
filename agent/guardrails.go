@@ -11,9 +11,9 @@ import (
 type Guardrails struct {
 	allowed    []string
 	maxActions int
-	// actionsAttempted counts actions that passed validation in this incident:
+	// numActionsAttempted counts actions that passed validation in this incident:
 	// applied ones (whether or not they worked) and, in dry-run mode, proposed ones.
-	actionsAttempted int
+	numActionsAttempted int
 }
 
 func NewGuardrails(cfg Config) *Guardrails {
@@ -26,12 +26,12 @@ func (g *Guardrails) Check(action string) error {
 	if !slices.Contains(g.allowed, action) {
 		return fmt.Errorf("action %q is not on the allowlist %v", action, g.allowed)
 	}
-	if g.actionsAttempted >= g.maxActions {
-		return fmt.Errorf("blast-radius limit reached: %d of %d actions already attempted for this incident", g.actionsAttempted, g.maxActions)
+	if g.numActionsAttempted >= g.maxActions {
+		return fmt.Errorf("blast-radius limit reached: %d of %d actions already attempted for this incident", g.numActionsAttempted, g.maxActions)
 	}
 	return nil
 }
 
 // RecordAttempt records that an action is going ahead (or, in dry-run mode,
 // was proposed), so it counts toward the incident's limit.
-func (g *Guardrails) RecordAttempt() { g.actionsAttempted++ }
+func (g *Guardrails) RecordAttempt() { g.numActionsAttempted++ }
