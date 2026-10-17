@@ -7,6 +7,7 @@
 coverage.*
 
 # Agent runtime output
+/audit/
 *.jsonl
 evals/results/
 
