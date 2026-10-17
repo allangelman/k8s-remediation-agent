@@ -10,7 +10,7 @@ ENV_BRANCH     := demo-env
 # Always target the kind cluster explicitly, never whatever context is current.
 KUBECTL := kubectl --context $(CONTEXT)
 
-.PHONY: help build test agent up down reset status argocd-ui break-image cluster argocd env-branch app refresh
+.PHONY: help build test agent up down reset status argocd-ui break-image break-crash break-oom cluster argocd env-branch app refresh
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-12s %s\n", $$1, $$2}'
@@ -51,10 +51,20 @@ argocd-ui: ## Port-forward the ArgoCD UI to http://localhost:8080 and print the 
 # Faults start with a reset so every run begins from main's history. Otherwise
 # earlier faults and the agent's reverts stay in demo-env's history, and the
 # agent (reasonably) treats a re-pushed change differently.
-break-image: reset ## Fault 1: push a nonexistent image tag (ImagePullBackOff)
-	@ENV_BRANCH=$(ENV_BRANCH) faults/bad-image-tag.sh
+define run_fault
+	@ENV_BRANCH=$(ENV_BRANCH) faults/$(1)
 	@$(MAKE) --no-print-directory refresh
 	@CONTEXT=$(CONTEXT) scripts/wait-for-app.sh Degraded
+endef
+
+break-image: reset ## Fault 1: push a nonexistent image tag (ImagePullBackOff)
+	$(call run_fault,bad-image-tag.sh)
+
+break-crash: reset ## Fault 2: push a bad port setting (CrashLoopBackOff)
+	$(call run_fault,crash-loop.sh)
+
+break-oom: reset ## Fault 3: push a too-low memory limit (OOMKilled)
+	$(call run_fault,oom.sh)
 
 cluster:
 	@if kind get clusters | grep -qx $(CLUSTER); then \
