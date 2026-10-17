@@ -145,7 +145,7 @@ func diagnosisToolParam() anthropic.BetaToolParam {
 		"root_cause":     str("One or two sentences: what is broken and why."),
 		"evidence":       map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Specific observations that support the root cause (events, statuses, log lines, diffs)."},
 		"suspect_commit": str("Full SHA of the commit that introduced the problem, or an empty string if no commit is responsible."),
-		"proposed_fix":   str("The remediation you would take, e.g. revert a specific commit. Describe it; do not perform it."),
+		"proposed_fix":   str("The remediation you took, or would recommend if you took none (e.g. revert a specific commit)."),
 		"confidence":     enum("How sure you are of the root cause.", "low", "medium", "high"),
 		"needs_human":    map[string]any{"type": "boolean", "description": "True if this should be escalated to a human instead of fixed automatically."},
 	}
