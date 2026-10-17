@@ -1,7 +1,14 @@
 # Shared setup for fault scripts that push a bad commit to the environment
-# branch. Source it, edit "$manifest", then call push_fault "<message>".
+# branch (demo-env).
 #
-# The commit is made in a temporary git worktree, so your checkout is untouched.
+# Sourcing this file checks out the latest demo-env into a temporary git
+# worktree (a separate directory), so the fault is committed there and your own
+# checkout and uncommitted work are never touched. The worktree is removed when
+# the script exits. A fault script then:
+#
+#   fail_if_broken "<pattern>"     # refuse if this fault is already applied
+#   edit_manifest "<sed expr>"     # edit $manifest (the worktree's deployment.yaml)
+#   push_fault "<commit message>"  # commit and push to demo-env
 
 env_branch=${ENV_BRANCH:-demo-env}
 repo=$(git rev-parse --show-toplevel)
