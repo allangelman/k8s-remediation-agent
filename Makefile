@@ -24,7 +24,7 @@ test: ## Run Go tests
 # Extra flags for the agent binary, e.g. make agent ARGS="--model claude-sonnet-5-5"
 ARGS ?=
 
-agent: build ## Run the agent: investigate demo-app and print a diagnosis (needs ANTHROPIC_API_KEY)
+agent: build ## Run the agent: diagnose demo-app, fix it, and verify (needs ANTHROPIC_API_KEY)
 	./bin/agent --context $(CONTEXT) $(ARGS)
 
 up: cluster argocd env-branch app refresh ## Create the cluster, install ArgoCD, and deploy the demo app
@@ -48,7 +48,10 @@ argocd-ui: ## Port-forward the ArgoCD UI to http://localhost:8080 and print the 
 	@echo "Open http://localhost:8080. Ctrl-C to stop."
 	$(KUBECTL) -n argocd port-forward svc/argocd-server 8080:80
 
-break-image: ## Fault 1: push a nonexistent image tag (ImagePullBackOff)
+# Faults start with a reset so every run begins from main's history. Otherwise
+# earlier faults and the agent's reverts stay in demo-env's history, and the
+# agent (reasonably) treats a re-pushed change differently.
+break-image: reset ## Fault 1: push a nonexistent image tag (ImagePullBackOff)
 	@ENV_BRANCH=$(ENV_BRANCH) faults/bad-image-tag.sh
 	@$(MAKE) --no-print-directory refresh
 	@CONTEXT=$(CONTEXT) scripts/wait-for-app.sh Degraded

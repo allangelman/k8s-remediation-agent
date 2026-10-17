@@ -1,10 +1,11 @@
-// Command agent investigates an unhealthy app on the local kind cluster and
-// prints a diagnosis. It is read-only: it never changes the cluster or repo.
+// Command agent responds to an unhealthy app on the local kind cluster: it
+// diagnoses the problem, takes at most one guarded action to fix it, verifies
+// recovery, and escalates if it can't. Exit codes: 0 resolved or proposed (dry
+// run), 1 error, 2 escalated to a human.
 package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -28,9 +29,16 @@ func main() {
 	flag.StringVar(&cfg.Model, "model", "claude-opus-5-5", "Claude model ID")
 	flag.StringVar(&cfg.Effort, "effort", "medium", "effort: low, medium, high, xhigh, or max")
 	flag.IntVar(&cfg.MaxSteps, "max-steps", 15, "max LLM round trips before giving up")
+	flag.BoolVar(&cfg.DryRun, "dry-run", false, "validate and log actions, but don't apply them")
+	flag.DurationVar(&cfg.VerifyTimeout, "verify-timeout", 2*time.Minute, "how long to wait for recovery after an action")
 	auditDir := flag.String("audit-dir", "audit", "directory for JSONL audit logs")
 	force := flag.Bool("force", false, "investigate even if the app is Healthy")
 	flag.Parse()
+
+	// Guardrails that aren't flags on purpose: widening them should be a
+	// reviewed code change, not a command-line option.
+	cfg.AllowedActions = []string{"revert_commit"}
+	cfg.MaxActions = 1
 
 	if err := run(cfg, *auditDir, *force); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
@@ -62,24 +70,37 @@ func run(cfg agent.Config, auditDir string, force bool) error {
 	}
 	defer audit.Close()
 
-	d, err := agent.Run(ctx, cfg, anthropic.NewClient(), audit, os.Stdout)
+	o, err := agent.Run(ctx, cfg, anthropic.NewClient(), audit, os.Stdout)
 	fmt.Printf("Audit log: %s\n", cfg.AuditPath)
-	if errors.Is(err, agent.ErrNoDiagnosis) {
-		fmt.Printf("\nESCALATE: %v\n", err)
-		os.Exit(2)
-	}
 	if err != nil {
 		return err
 	}
+	printOutcome(o)
+	if o.Status == agent.StatusEscalated {
+		os.Exit(2)
+	}
+	return nil
+}
 
-	fmt.Printf("\n=== DIAGNOSIS ===\n")
+func printOutcome(o *agent.Outcome) {
+	fmt.Printf("\n=== %s ===\n", strings.ToUpper(o.Status))
+	fmt.Printf("Why:            %s\n", o.Reason)
+	if a := o.Action; a != nil {
+		fmt.Printf("Action:         %s\n", a.Summary)
+		if a.Revision != "" {
+			fmt.Printf("Pushed:         %s\n", a.Revision)
+		}
+	}
+	d := o.Diagnosis
+	if d == nil {
+		return
+	}
 	fmt.Printf("Category:       %s (confidence: %s)\n", d.Category, d.Confidence)
 	fmt.Printf("Root cause:     %s\n", d.RootCause)
 	if d.SuspectCommit != "" {
 		fmt.Printf("Suspect commit: %s\n", d.SuspectCommit)
 	}
-	fmt.Printf("Proposed fix:   %s\n", d.ProposedFix)
+	fmt.Printf("Fix:            %s\n", d.ProposedFix)
 	fmt.Printf("Needs human:    %t\n", d.NeedsHuman)
 	fmt.Printf("Evidence:\n  - %s\n", strings.Join(d.Evidence, "\n  - "))
-	return nil
 }
