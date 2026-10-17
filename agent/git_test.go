@@ -36,7 +36,7 @@ func testRepo(t *testing.T) (dir string, commit func(path, content, msg string) 
 	return dir, commit
 }
 
-func TestValidateRevert(t *testing.T) {
+func TestValidatePotentialRevert(t *testing.T) {
 	ctx := context.Background()
 	dir, commit := testRepo(t)
 
@@ -48,7 +48,7 @@ func TestValidateRevert(t *testing.T) {
 	outside := commit("Makefile", "all:\n", "touch a file outside apps/")
 	bad := commit("apps/demo/deployment.yaml", "image: v2-typo\n", "Pin image to v2-typo")
 
-	if subject, err := validateRevert(ctx, dir, "main", bad); err != nil || subject != "Pin image to v2-typo" {
+	if subject, err := validatePotentialRevert(ctx, dir, "main", bad); err != nil || subject != "Pin image to v2-typo" {
 		t.Errorf("valid revert: got %q, %v", subject, err)
 	}
 
@@ -60,14 +60,14 @@ func TestValidateRevert(t *testing.T) {
 		"unknown commit id": strings.Repeat("a", 40),
 	}
 	for name, sha := range rejects {
-		if _, err := validateRevert(ctx, dir, "main", sha); err == nil {
+		if _, err := validatePotentialRevert(ctx, dir, "main", sha); err == nil {
 			t.Errorf("%s: expected rejection", name)
 		}
 	}
 
 	// Once reverted, the same commit must not be reverted again.
 	commit("apps/demo/deployment.yaml", "image: v1\n", "Revert\n\nThis reverts commit "+bad+".")
-	if _, err := validateRevert(ctx, dir, "main", bad); err == nil || !strings.Contains(err.Error(), "already reverted") {
+	if _, err := validatePotentialRevert(ctx, dir, "main", bad); err == nil || !strings.Contains(err.Error(), "already reverted") {
 		t.Errorf("already reverted: got %v", err)
 	}
 }

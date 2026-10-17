@@ -27,9 +27,9 @@ const maxRevertDepth = 10
 
 var fullSHA = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
-// validateRevert checks that sha is safe to revert automatically on ref and
+// validatePotentialRevert checks that sha is safe to revert automatically on ref and
 // returns its subject line. It only reads the repo.
-func validateRevert(ctx context.Context, repo, ref, sha string) (string, error) {
+func validatePotentialRevert(ctx context.Context, repo, ref, sha string) (string, error) {
 	if !fullSHA.MatchString(sha) {
 		return "", fmt.Errorf("commit_sha must be a full 40-character SHA, got %q", sha)
 	}

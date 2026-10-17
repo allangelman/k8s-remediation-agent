@@ -193,14 +193,14 @@ func runAction(ctx context.Context, cfg Config, guard *Guardrails, a Action, pre
 	}
 
 	// 2. Plan: action-specific validation. Nothing has changed yet, so a
-	// rejected plan doesn't use up the incident's action budget.
+	// rejected plan doesn't count toward the incident's action limit.
 	plan, err := a.Plan(ctx, input)
 	if err != nil {
 		fmt.Fprintf(out, "\033[33m  🛡 rejected: %s\033[0m\n", err)
 		audit.Write("action_rejected", map[string]any{"step": step, "action": a.Name, "input": input, "reason": err.Error()})
 		return reply("Action rejected by validation: "+err.Error(), true), prev
 	}
-	guard.Consume()
+	guard.RecordAttempt()
 	rec := &ActionRecord{Name: a.Name, Summary: plan.Summary, DryRun: cfg.DryRun}
 	fmt.Fprintf(out, "\033[32m  🛡 allowed: %s\033[0m\n", plan.Summary)
 	audit.Write("guardrail_allowed", map[string]any{"step": step, "action": a.Name, "input": input, "plan": plan.Summary})

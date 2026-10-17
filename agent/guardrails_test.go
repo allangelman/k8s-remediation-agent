@@ -14,7 +14,7 @@ func TestGuardrails(t *testing.T) {
 	if err := g.Check("revert_commit"); err != nil {
 		t.Errorf("first revert_commit: got %v, want allowed", err)
 	}
-	g.Consume()
+	g.RecordAttempt()
 	if err := g.Check("revert_commit"); err == nil || !strings.Contains(err.Error(), "blast-radius") {
 		t.Errorf("second action: got %v, want blast-radius error", err)
 	}

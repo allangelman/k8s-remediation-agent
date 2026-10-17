@@ -57,7 +57,7 @@ func revertCommitAction(cfg Config) Action {
 			if _, err := git(ctx, cfg.RepoDir, "fetch", "-q", "origin", cfg.EnvBranch); err != nil {
 				return nil, err
 			}
-			subject, err := validateRevert(ctx, cfg.RepoDir, "origin/"+cfg.EnvBranch, in.CommitSHA)
+			subject, err := validatePotentialRevert(ctx, cfg.RepoDir, "origin/"+cfg.EnvBranch, in.CommitSHA)
 			if err != nil {
 				return nil, err
 			}
