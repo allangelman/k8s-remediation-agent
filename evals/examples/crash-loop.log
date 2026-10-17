@@ -1,0 +1,18 @@
+ALERT: ArgoCD reports application "demo-app" (namespace "demo") as sync=Synced, health=Degraded. Investigate, and fix it if you can do so safely.
+
+I'll start by checking the app status, pods, and recent deploy history in parallel.
+→ get_app_status 
+→ list_pods 
+→ get_deploy_history 
+[thinking] That port number 98989 exceeds the valid range of 65535, so I should check the logs to confirm this and explain the issue clearly.
+The latest commit sets `--port=98989`, which is above the highest valid port (65535). I'll check the crashing pod's logs and description to confirm.
+→ get_pod_logs {"name":"demo-app-56c45588db-x8hjx","previous":true}
+→ describe_pod {"name":"demo-app-56c45588db-x8hjx"}
+The logs confirm it: the app exits with "invalid port" for 98989. Reverting commit b92bfec only removes that bad command line and puts back the last config that worked, so I'm reverting it.
+⚡ revert_commit {"commit_sha":"b92bfec579443b25019d519a121ddf32bf2631a9","reason":"Commit set command to ./podinfo --port=98989, an invalid TCP port (>65535), causing podinfo to exit fatally and CrashLoopBackOff."}
+  🛡 allowed: revert b92bfec ("Set podinfo listen port explicitly") on demo-env
+  applied: pushed a8ea1be
+  verifying: waiting up to 2m0s for Synced/Healthy at a8ea1be...
+  ✓ recovered: Synced/Healthy at a8ea1be
+
+Tokens: 20621 in, 1177 out
