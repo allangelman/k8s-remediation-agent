@@ -68,7 +68,7 @@ Requires an Anthropic API key in `ANTHROPIC_API_KEY`.
 ```sh
 make break-image  # break the app
 make agent        # investigate and print a diagnosis
-make reset        # put it back
+make reset        # undo the fault and wait until the app is healthy
 ```
 
 The agent is currently **read-only**: its tools can inspect ArgoCD, pods,
@@ -104,7 +104,8 @@ Proposed fix:   Revert commit 78e5b37e... on the ArgoCD-tracked branch ...
 ```
 
 Flags: `--model` (default `claude-opus-5-5`), `--effort` (default `medium`),
-`--max-steps` (default 15), `--force` (run even if the app is healthy).
+`--max-steps` (default 15), `--force` (run even if the app is healthy). Pass
+them through make with `ARGS`, e.g. `make agent ARGS="--model claude-sonnet-5-5"`.
 
 ## License
 

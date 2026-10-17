@@ -41,6 +41,11 @@ func (c Config) GetAppStatus(ctx context.Context) (AppStatus, error) {
 	if err != nil {
 		return AppStatus{}, err
 	}
+	return parseAppStatus([]byte(out))
+}
+
+// parseAppStatus extracts AppStatus from an ArgoCD Application's JSON.
+func parseAppStatus(data []byte) (AppStatus, error) {
 	var app struct {
 		Status struct {
 			Sync struct {
@@ -57,7 +62,7 @@ func (c Config) GetAppStatus(ctx context.Context) (AppStatus, error) {
 			} `json:"history"`
 		} `json:"status"`
 	}
-	if err := json.Unmarshal([]byte(out), &app); err != nil {
+	if err := json.Unmarshal(data, &app); err != nil {
 		return AppStatus{}, fmt.Errorf("parse application: %w", err)
 	}
 	s := app.Status

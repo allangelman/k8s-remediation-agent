@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"time"
@@ -38,7 +39,11 @@ func main() {
 }
 
 func run(cfg agent.Config, auditDir string, force bool) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	// ctx carries a deadline and a cancel signal into every API call and kubectl
+	// command. It's cancelled after 10 minutes or on Ctrl-C, whichever is first.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
 	status, err := cfg.GetAppStatus(ctx)

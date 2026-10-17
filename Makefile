@@ -21,8 +21,11 @@ build: ## Build the agent binary into bin/
 test: ## Run Go tests
 	go test ./...
 
+# Extra flags for the agent binary, e.g. make agent ARGS="--model claude-sonnet-5-5"
+ARGS ?=
+
 agent: build ## Run the agent: investigate demo-app and print a diagnosis (needs ANTHROPIC_API_KEY)
-	./bin/agent --context $(CONTEXT)
+	./bin/agent --context $(CONTEXT) $(ARGS)
 
 up: cluster argocd env-branch app refresh ## Create the cluster, install ArgoCD, and deploy the demo app
 	@CONTEXT=$(CONTEXT) scripts/wait-for-app.sh Healthy
