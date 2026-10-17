@@ -20,6 +20,7 @@ type Action struct {
 // Plan is a validated action, ready to apply.
 type Plan struct {
 	Summary string // human-readable description of the change
+	Target  string // what the action acts on, e.g. the commit being reverted
 	// Apply makes the change and returns the Git revision ArgoCD should end up
 	// on, which verification waits for.
 	Apply func(ctx context.Context) (revision string, err error)
@@ -63,6 +64,7 @@ func revertCommitAction(cfg Config) Action {
 			}
 			return &Plan{
 				Summary: fmt.Sprintf("revert %s (%q) on %s", in.CommitSHA[:7], subject, cfg.EnvBranch),
+				Target:  in.CommitSHA,
 				Apply: func(ctx context.Context) (string, error) {
 					rev, err := revertAndPush(ctx, cfg, in.CommitSHA, subject, in.Reason)
 					if err != nil {
