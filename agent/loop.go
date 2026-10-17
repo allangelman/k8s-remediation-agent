@@ -210,7 +210,7 @@ func runAction(ctx context.Context, cfg Config, guard *Guardrails, a Action, pre
 		fmt.Fprintf(out, "\033[33m  DRY RUN: not applied\033[0m\n")
 		audit.Write("action_dry_run", map[string]any{"step": step, "action": rec})
 		return reply("DRY RUN: the action passed all checks but was not applied: "+plan.Summary+
-			". No further actions are available. Call submit_diagnosis.", false), rec
+			". No further actions are available. Call submit_diagnosis, answering needs_human as if the action had been applied.", false), rec
 	}
 
 	// 4. Apply.
