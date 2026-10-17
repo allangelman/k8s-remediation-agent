@@ -10,7 +10,7 @@ ENV_BRANCH     := demo-env
 # Always target the kind cluster explicitly, never whatever context is current.
 KUBECTL := kubectl --context $(CONTEXT)
 
-.PHONY: help build test up down reset status argocd-ui break-image cluster argocd env-branch app refresh
+.PHONY: help build test agent up down reset status argocd-ui break-image cluster argocd env-branch app refresh
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-12s %s\n", $$1, $$2}'
@@ -20,6 +20,9 @@ build: ## Build the agent binary into bin/
 
 test: ## Run Go tests
 	go test ./...
+
+agent: build ## Run the agent: investigate demo-app and print a diagnosis (needs ANTHROPIC_API_KEY)
+	./bin/agent --context $(CONTEXT)
 
 up: cluster argocd env-branch app refresh ## Create the cluster, install ArgoCD, and deploy the demo app
 	@CONTEXT=$(CONTEXT) scripts/wait-for-app.sh Healthy
