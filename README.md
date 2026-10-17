@@ -6,7 +6,7 @@ remediates, verifies recovery, and escalates to a human when it can't fix the
 problem. Every action passes through guardrails and is written to an audit log,
 and an eval harness measures how often the agent gets it right.
 
-> **Status:** the agent diagnoses and fixes the bad-image-tag fault end to end, with guardrails and verification. More faults and the eval harness are in progress.
+> **Status:** the agent diagnoses and fixes three fault scenarios end to end, with guardrails and verification. The eval harness is in progress.
 
 ## How it works
 
@@ -46,14 +46,20 @@ make down      # delete the cluster
 Break things and recover:
 
 ```sh
-make break-image
+make break-image   # or break-crash, break-oom
 make reset
 ```
 
 | Target        | What it does |
 |---------------|--------------|
-| `break-image` | **Fault 1, bad image tag.** Resets first, then pushes a commit to `demo-env` that points the Deployment at an image tag that doesn't exist. New pods can't pull the image (`ImagePullBackOff`), the rollout stalls while the old pods keep serving, and ArgoCD reports the app **Synced but Degraded** (~1 min). |
+| `break-image` | **Fault 1, bad image tag** → `ImagePullBackOff` |
+| `break-crash` | **Fault 2, invalid port in the start command** → `CrashLoopBackOff` |
+| `break-oom`   | **Fault 3, memory limit too low** → `OOMKilled` |
 | `reset`       | **Undo any fault.** Force-resets `demo-env` to match `main`, then waits until the app is Synced and Healthy again (~10 s). |
+
+Each fault resets first, then pushes a realistic bad commit to `demo-env`. The
+new pods fail, the rollout stalls while the old pods keep serving, and ArgoCD
+reports the app **Synced but Degraded** (~1 min). Details in [faults/](faults/).
 
 ArgoCD deploys `apps/demo-app/` from the **`demo-env`** branch, not `main`.
 `demo-env` acts as the environment: fault scripts push bad commits to it, and
