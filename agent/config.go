@@ -2,7 +2,10 @@
 // definitions, guardrails, and audit logging.
 package agent
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 // Config fixes everything the agent is allowed to look at and do. The LLM
 // never chooses the cluster, namespace, app, or branch: tools always use these
@@ -25,4 +28,15 @@ type Config struct {
 	VerifyTimeout  time.Duration // how long to wait for recovery after an action
 
 	AuditPath string // JSONL file every step is appended to
+
+	// Progress, if set, gets one short line per step (what Claude asked for
+	// and what happened). The eval uses it to show progress in the terminal
+	// while the full output goes to a log file.
+	Progress func(line string)
+}
+
+func (c Config) progress(format string, args ...any) {
+	if c.Progress != nil {
+		c.Progress(fmt.Sprintf(format, args...))
+	}
 }

@@ -89,19 +89,30 @@ func main() {
 	}
 	client := anthropic.NewClient()
 
+	scs := selected(*only)
+	total := len(scs) * *runs
+	fmt.Printf("Eval: %d scenario(s) × %d run(s) each, model %s (effort %s)\n", len(scs), *runs, *model, *effort)
+	fmt.Printf("Writing results to %s\n", outDir)
+
 	var results []Result
-	for _, sc := range selected(*only) {
+	for _, sc := range scs {
 		for i := 1; i <= *runs; i++ {
-			fmt.Printf("%-14s run %d/%d: ", sc.Name, i, *runs)
+			fmt.Printf("\n[%d/%d] %s, run %d/%d\n", len(results)+1, total, sc.Name, i, *runs)
 			r := runOnce(ctx, client, cfg, *cluster, sc, i, outDir)
 			results = append(results, r)
-			fmt.Printf("%-9s diagnosis=%-5t remediation=%-5t unsafe=%d recovery=%5.1fs\n",
-				r.Status, r.CorrectDiagnosis, r.CorrectRemediation, r.UnsafeActions, r.RecoverySeconds)
+			if r.Error != "" {
+				fmt.Printf("  result: ERROR: %s\n", r.Error)
+			} else {
+				fmt.Printf("  result: %s  diagnosis %s  remediation %s  unsafe %d  recovery %.1fs  cost %s\n",
+					strings.ToUpper(r.Status), mark(r.CorrectDiagnosis), mark(r.CorrectRemediation),
+					r.UnsafeActions, r.RecoverySeconds, costString(*model, r.InputTokens, r.OutputTokens))
+			}
 			if ctx.Err() != nil {
 				break
 			}
 		}
 	}
+	fmt.Println("\nResetting demo-env to main...")
 	makeTarget(context.Background(), *cluster, "reset")
 
 	b, _ := json.MarshalIndent(results, "", "  ")
@@ -117,6 +128,8 @@ func runOnce(ctx context.Context, client anthropic.Client, cfg agent.Config, clu
 
 	// Inject the fault (the make target resets first), then record which
 	// commit is the culprit: the head of the env branch.
+	fmt.Printf("  inject: make %s (reset demo-env, push the bad commit, wait for Degraded)...\n", sc.MakeTarget)
+	injectStart := time.Now()
 	if out, err := makeTarget(ctx, cluster, sc.MakeTarget); err != nil {
 		r.Status, r.Error = "error", "fault injection failed: "+lastLine(out)
 		return r
@@ -128,6 +141,9 @@ func runOnce(ctx context.Context, client anthropic.Client, cfg agent.Config, clu
 		return r
 	}
 	r.FaultCommit = strings.TrimSpace(string(sha))
+	subject, _ := exec.CommandContext(ctx, "git", "log", "-1", "--format=%s", r.FaultCommit).Output()
+	fmt.Printf("  inject: app Degraded after %.0fs; fault commit %.7s %q\n",
+		time.Since(injectStart).Seconds(), r.FaultCommit, strings.TrimSpace(string(subject)))
 
 	cfg.AuditPath = filepath.Join(outDir, name+".jsonl")
 	audit, err := agent.OpenAuditLog(cfg.AuditPath)
@@ -135,7 +151,10 @@ func runOnce(ctx context.Context, client anthropic.Client, cfg agent.Config, clu
 		r.Status, r.Error = "error", err.Error()
 		return r
 	}
-	logFile, _ := os.Create(filepath.Join(outDir, name+".log"))
+	logPath := filepath.Join(outDir, name+".log")
+	logFile, _ := os.Create(logPath)
+	fmt.Printf("  agent:  running (full output: %s)\n", logPath)
+	cfg.Progress = func(line string) { fmt.Println("    " + line) }
 	start := time.Now()
 	o, err := agent.Run(ctx, cfg, client, audit, logFile)
 	r.Seconds = time.Since(start).Seconds()
@@ -231,6 +250,25 @@ var prices = map[string][2]float64{
 	"claude-haiku-5-5":  {0.10, 0.50},
 }
 
+func tokenCost(p [2]float64, in, out int64) float64 {
+	return (float64(in)*p[0] + float64(out)*p[1]) / 1e6
+}
+
+func costString(model string, in, out int64) string {
+	p, ok := prices[model]
+	if !ok {
+		return "n/a"
+	}
+	return fmt.Sprintf("$%.3f", tokenCost(p, in, out))
+}
+
+func mark(ok bool) string {
+	if ok {
+		return "✓"
+	}
+	return "✗"
+}
+
 func summarize(results []Result, model, effort string, runs int) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Model `%s`, effort `%s`, %d runs per scenario.\n\n", model, effort, runs)
@@ -260,7 +298,7 @@ func summarize(results []Result, model, effort string, runs int) string {
 			}
 			unsafe += r.UnsafeActions
 			denied += r.DeniedActions
-			cost += (float64(r.InputTokens)*p[0] + float64(r.OutputTokens)*p[1]) / 1e6
+			cost += tokenCost(p, r.InputTokens, r.OutputTokens)
 		}
 		n := len(rs)
 		costCol := "n/a"

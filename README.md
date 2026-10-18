@@ -11,16 +11,35 @@ using fault scripts that push realistic bad deploys.
 
 ```
 $ make break-image && make agent
+── OBSERVE  reading ArgoCD status for "demo-app"
 ALERT: ArgoCD reports application "demo-app" (namespace "demo") as sync=Synced, health=Degraded. ...
-→ get_app_status  → list_pods  → get_events
-Image pull failure on the new ReplicaSet; checking the pod details and commit history.
-→ describe_pod  → get_deploy_history
-Commit b09bb21 changed the image tag from `6.15.0` to `v6.15.0`. ... so I'm reverting that commit.
-⚡ revert_commit {"commit_sha":"b09bb21f...","reason":"..."}
-  🛡 allowed: revert b09bb21 ("Pin podinfo image to v6.15.0") on demo-env
-  applied: pushed bd7bf28
-  ✓ recovered: Synced/Healthy at bd7bf28
-=== RESOLVED ===
+
+── SETUP  what Claude may request (Claude only asks; this code runs each request)
+   read-only tools: get_app_status, list_pods, describe_pod, ... get_deploy_history
+   actions:         revert_commit (at most 1 per incident, checked by guardrails)
+   to finish:       submit_diagnosis
+
+── STEP 1/15  sending the conversation to Claude (1 message)
+   Claude: I'll start by checking the app status, pods, and recent events.
+   → get_app_status
+   → list_pods
+   → get_events
+── STEP 2/15  sending the conversation to Claude (3 messages)
+   Claude: Image tag not found; checking the commit history to find the change.
+   → get_deploy_history
+── STEP 3/15  sending the conversation to Claude (5 messages)
+   [thinking] Found it: commit c5bdeb2 changed the image tag to `v6.15.0`, which doesn't exist ...
+
+── ACT  Claude requested revert_commit {"commit_sha":"c5bdeb21...","reason":"..."}; the code checks it before anything changes
+   1. guardrails: passed (allowlisted, within the 1-action limit)
+   2. validate:   🛡 allowed: revert c5bdeb2 ("Pin podinfo image to v6.15.0") on demo-env
+   3. apply:      pushed a13be5e to demo-env
+   4. verify:     waiting up to 2m0s for ArgoCD to report Synced/Healthy at a13be5e...
+      ✓ recovered after 3s: Synced/Healthy at a13be5e
+
+── STEP 4/15  sending the conversation to Claude (7 messages)
+── REPORT  Claude called submit_diagnosis: category image_pull, suspect commit c5bdeb2, confidence high, ...
+── OUTCOME  decided by the code from what happened, not by Claude: RESOLVED (action applied and recovery verified)
 ```
 
 ## Results
