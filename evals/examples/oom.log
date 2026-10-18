@@ -1,0 +1,18 @@
+ALERT: ArgoCD reports application "demo-app" (namespace "demo") as sync=Synced, health=Degraded. Investigate, and fix it if you can do so safely.
+
+I'll start by checking the app status, pods, and recent deploy history.
+→ get_app_status 
+→ list_pods 
+→ get_deploy_history 
+[thinking] I should check the pod description to confirm it was actually OOMKilled.
+The latest commit cut memory to 8Mi; I'll confirm whether the crashing pod is being OOMKilled.
+→ describe_pod {"name":"demo-app-797c599d7-9grcf"}
+→ get_pod_logs {"name":"demo-app-797c599d7-9grcf","previous":true}
+OOMKilled is confirmed, and the 8Mi limit from commit dfab7ed is the clear cause. I'm reverting that commit.
+⚡ revert_commit {"commit_sha":"dfab7edc2fbed2f3fbe4535bc93683c3191b7e3a","reason":"Commit lowered podinfo memory limit from 128Mi to 8Mi, causing the container to be OOMKilled (exit 137) on startup and CrashLoopBackOff."}
+  🛡 allowed: revert dfab7ed ("Right-size podinfo memory to 8Mi") on demo-env
+  applied: pushed 59774d1
+  verifying: waiting up to 2m0s for Synced/Healthy at 59774d1...
+  ✓ recovered: Synced/Healthy at 59774d1
+
+Tokens: 20018 in, 1131 out

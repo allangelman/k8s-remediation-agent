@@ -1,0 +1,19 @@
+ALERT: ArgoCD reports application "demo-app" (namespace "demo") as sync=Synced, health=Degraded. Investigate, and fix it if you can do so safely.
+
+I'll start by checking the app status, pods, and recent events together.
+→ get_app_status 
+→ list_pods 
+→ get_events 
+[thinking] The pod is stuck in ErrImagePull on tag v6.15.0, so I should check the deployment history to see what changed.
+The current rollout is stuck on an image tag that doesn't exist (`v6.15.0`). Next I'm checking the commit history and the Deployment to find which commit made that change.
+→ get_deploy_history 
+→ describe_deployment 
+[thinking] This confirms reverting commit 0d63ae03 is the right call, since the parent state's image 6.15.0 is already running fine in the older pods that have been stable for 24 hours.
+The evidence is clear: commit 0d63ae03 changed the image tag from `6.15.0` (which works and is what the healthy pods are running) to `v6.15.0` (which doesn't exist). Reverting that commit.
+⚡ revert_commit {"commit_sha":"0d63ae0342e57c65fb304ecaf3104bbd95c857da","reason":"Commit changed the podinfo image tag from 6.15.0 to v6.15.0, which does not exist in ghcr.io, causing ErrImagePull and a stalled rollout."}
+  🛡 allowed: revert 0d63ae0 ("Pin podinfo image to v6.15.0") on demo-env
+  applied: pushed f07926b
+  verifying: waiting up to 2m0s for Synced/Healthy at f07926b...
+  ✓ recovered: Synced/Healthy at f07926b
+
+Tokens: 35339 in, 1207 out
