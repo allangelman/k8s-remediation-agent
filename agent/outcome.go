@@ -11,6 +11,7 @@ const (
 type ActionRecord struct {
 	Name     string `json:"name"`
 	Summary  string `json:"summary"`
+	Target   string `json:"target"` // e.g. the reverted commit's SHA
 	DryRun   bool   `json:"dry_run"`
 	Applied  bool   `json:"applied"`
 	Revision string `json:"revision,omitempty"` // commit the action pushed

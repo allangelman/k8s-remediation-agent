@@ -10,7 +10,7 @@ ENV_BRANCH     := demo-env
 # Always target the kind cluster explicitly, never whatever context is current.
 KUBECTL := kubectl --context $(CONTEXT)
 
-.PHONY: help build test agent up down reset status argocd-ui break-image break-crash break-oom cluster argocd env-branch app refresh
+.PHONY: help build test agent eval up down reset status argocd-ui break-image break-crash break-oom cluster argocd env-branch app refresh
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-12s %s\n", $$1, $$2}'
@@ -26,6 +26,11 @@ ARGS ?=
 
 agent: build ## Run the agent: diagnose demo-app, fix it, and verify (needs ANTHROPIC_API_KEY)
 	./bin/agent --context $(CONTEXT) $(ARGS)
+
+RUNS ?= 3
+
+eval: ## Run every fault scenario RUNS times (default 3) and score the agent (needs ANTHROPIC_API_KEY)
+	go run ./evals --runs $(RUNS) --cluster $(CLUSTER) $(ARGS)
 
 up: cluster argocd env-branch app refresh ## Create the cluster, install ArgoCD, and deploy the demo app
 	@CONTEXT=$(CONTEXT) scripts/wait-for-app.sh Healthy
