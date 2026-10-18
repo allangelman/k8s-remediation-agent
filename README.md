@@ -49,17 +49,7 @@ known answer. See [Evals](#evals) for the scoring definitions.
 
 ```mermaid
 flowchart LR
-    subgraph git["GitHub repo"]
-        main["main<br/>(protected, PRs only)"]
-        env["demo-env<br/>(environment branch)"]
-    end
-
-    subgraph kind["kind cluster"]
-        argo["ArgoCD<br/>auto-sync, self-heal off"]
-        app["demo-app<br/>(podinfo)"]
-    end
-
-    faults["faults/*.sh<br/>push bad commits"]
+    claude(["Claude API"])
 
     subgraph agent["agent (Go)"]
         loop["agent loop"]
@@ -69,17 +59,31 @@ flowchart LR
         audit[("audit log<br/>JSONL")]
     end
 
-    claude(["Claude API"])
+    subgraph git["GitHub repo"]
+        main["main<br/>(protected, PRs only)"]
+        env["demo-env<br/>(environment branch)"]
+    end
+
+    faults["faults/*.sh"]
+
+    subgraph kind["kind cluster"]
+        argo["ArgoCD<br/>auto-sync, self-heal off"]
+        app["demo-app<br/>(podinfo)"]
+    end
+
+    claude <-- "tool requests /<br/>tool results" --> loop
+    loop --> audit
+    loop --> tools
+    loop --> guard
+    tools -. "inspect" .-> app
+    guard -- "revert_commit<br/>(git push)" --> env
+    guard --> verify
+    verify -. "poll status" .-> argo
 
     main -- "make up / reset" --> env
-    faults --> env
-    env --> argo --> app
-
-    loop <--> claude
-    loop --> tools --> app
-    loop --> guard -- "revert_commit<br/>(git push)" --> env
-    guard --> verify --> argo
-    loop --> audit
+    faults -- "push bad commit" --> env
+    env -- "auto-sync" --> argo
+    argo -- "deploy" --> app
 ```
 
 - **ArgoCD deploys from `demo-env`, not `main`.** `demo-env` is the
