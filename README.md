@@ -9,6 +9,12 @@ log, and an eval harness measures how often it gets things right.
 It runs against a local [kind](https://kind.sigs.k8s.io/) cluster with ArgoCD,
 using fault scripts that push realistic bad deploys.
 
+## Demo
+
+Breaking the app with a bad image tag, then watching the agent diagnose it, revert the bad commit, and verify recovery (6 minutes, sped up to 1.5×):
+
+VIDEO_URL_PLACEHOLDER
+
 ```
 $ make break-image && make agent
 ── OBSERVE  reading ArgoCD status for "demo-app"
