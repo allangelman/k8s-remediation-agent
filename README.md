@@ -13,7 +13,7 @@ using fault scripts that push realistic bad deploys.
 
 Breaking the app with a bad image tag, then watching the agent diagnose it, revert the bad commit, and verify recovery (6 minutes, sped up to 1.5×):
 
-VIDEO_URL_PLACEHOLDER
+https://github.com/user-attachments/assets/6526d12a-b445-442d-9a00-4493ae8d5eba
 
 ```
 $ make break-image && make agent
