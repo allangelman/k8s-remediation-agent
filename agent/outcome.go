@@ -11,10 +11,10 @@ const (
 type ActionRecord struct {
 	Name     string `json:"name"`
 	Summary  string `json:"summary"`
-	Target   string `json:"target"` // e.g. the reverted commit's SHA
+	Target   string `json:"target"` // e.g. the reverted commit's SHA, or the revision synced to
 	DryRun   bool   `json:"dry_run"`
 	Applied  bool   `json:"applied"`
-	Revision string `json:"revision,omitempty"` // commit the action pushed
+	Revision string `json:"revision,omitempty"` // revision the app should end up at, e.g. the revert commit
 	Verified bool   `json:"verified"`
 	Error    string `json:"error,omitempty"`
 }

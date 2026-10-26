@@ -28,7 +28,10 @@ type AppStatus struct {
 	Revision string `json:"revision"`
 	Health   string `json:"health"`
 	Message  string `json:"message,omitempty"`
-	History  []struct {
+	// Phase of the current or last ArgoCD operation (e.g. a sync): Running,
+	// Succeeded, Failed, ...
+	Operation string `json:"operation,omitempty"`
+	History   []struct {
 		Revision   string `json:"revision"`
 		DeployedAt string `json:"deployedAt"`
 	} `json:"history,omitempty"`
@@ -69,14 +72,18 @@ func parseAppStatus(data []byte) (AppStatus, error) {
 				Revision   string `json:"revision"`
 				DeployedAt string `json:"deployedAt"`
 			} `json:"history"`
-			Resources []ResourceStatus `json:"resources"`
+			Resources      []ResourceStatus `json:"resources"`
+			OperationState struct {
+				Phase string `json:"phase"`
+			} `json:"operationState"`
 		} `json:"status"`
 	}
 	if err := json.Unmarshal(data, &app); err != nil {
 		return AppStatus{}, fmt.Errorf("parse application: %w", err)
 	}
 	s := app.Status
-	st := AppStatus{Sync: s.Sync.Status, Revision: s.Sync.Revision, Health: s.Health.Status, Message: s.Health.Message}
+	st := AppStatus{Sync: s.Sync.Status, Revision: s.Sync.Revision, Health: s.Health.Status, Message: s.Health.Message,
+		Operation: s.OperationState.Phase}
 	// Keep the 5 most recent deploys.
 	if n := len(s.History); n > 5 {
 		s.History = s.History[n-5:]

@@ -37,8 +37,9 @@ func main() {
 
 	// Guardrails that aren't flags on purpose: widening them should be a
 	// reviewed code change, not a command-line option.
-	cfg.AllowedActions = []string{"revert_commit"}
+	cfg.AllowedActions = []string{"revert_commit", "sync_app"}
 	cfg.MaxActions = 1
+	cfg.PersonEditCooldown = 30 * time.Minute
 
 	if err := run(cfg, *auditDir, *force); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)

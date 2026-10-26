@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 )
@@ -10,6 +11,19 @@ import (
 func (c Config) Refresh(ctx context.Context) error {
 	_, err := c.kubectl(ctx, "-n", "argocd", "annotate", "application", c.App,
 		"argocd.argoproj.io/refresh=normal", "--overwrite")
+	return err
+}
+
+// Sync starts an ArgoCD sync of the app to revision, the same as pressing Sync
+// in the ArgoCD UI: ArgoCD reapplies Git, overwriting live changes. The reason
+// is recorded on the operation, so ArgoCD's history shows why the agent synced.
+func (c Config) Sync(ctx context.Context, revision, reason string) error {
+	op, _ := json.Marshal(map[string]any{"operation": map[string]any{
+		"initiatedBy": map[string]any{"username": agentName},
+		"info":        []map[string]string{{"name": "reason", "value": reason}},
+		"sync":        map[string]any{"revision": revision},
+	}})
+	_, err := c.kubectl(ctx, "-n", "argocd", "patch", "application", c.App, "--type", "merge", "-p", string(op))
 	return err
 }
 
