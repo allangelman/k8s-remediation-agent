@@ -32,6 +32,15 @@ type AppStatus struct {
 		Revision   string `json:"revision"`
 		DeployedAt string `json:"deployedAt"`
 	} `json:"history,omitempty"`
+	Resources []ResourceStatus `json:"resources,omitempty"`
+}
+
+// ResourceStatus is ArgoCD's sync status for one object the app manages.
+type ResourceStatus struct {
+	Kind      string `json:"kind"`
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+	Status    string `json:"status"` // Synced or OutOfSync
 }
 
 // GetAppStatus reads the ArgoCD Application and trims it to sync, health, and
@@ -60,6 +69,7 @@ func parseAppStatus(data []byte) (AppStatus, error) {
 				Revision   string `json:"revision"`
 				DeployedAt string `json:"deployedAt"`
 			} `json:"history"`
+			Resources []ResourceStatus `json:"resources"`
 		} `json:"status"`
 	}
 	if err := json.Unmarshal(data, &app); err != nil {
@@ -72,5 +82,6 @@ func parseAppStatus(data []byte) (AppStatus, error) {
 		s.History = s.History[n-5:]
 	}
 	st.History = s.History
+	st.Resources = s.Resources
 	return st, nil
 }
