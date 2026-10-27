@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -86,5 +88,85 @@ func TestLiveChangeDescribe(t *testing.T) {
 	script := LiveChange{Field: "spec.replicas", Value: "3", Manager: "legacy-tuner", Time: &ts}
 	if got := script.Describe(now); !strings.Contains(got, "automation") {
 		t.Errorf("Describe() = %q", got)
+	}
+}
+
+func TestOwnedFields(t *testing.T) {
+	live := map[string]any{
+		"metadata": map[string]any{
+			"labels":     map[string]any{"team": "sre"},
+			"finalizers": []any{"example.com/cleanup"},
+		},
+		"spec": map[string]any{"containers": []any{
+			map[string]any{"name": "podinfo", "image": "podinfo:6.15.0", "ports": []any{
+				map[string]any{"containerPort": float64(9898), "protocol": "TCP"},
+			}},
+		}},
+	}
+	tests := []struct {
+		name   string
+		fields string // fieldsV1 JSON
+		want   []ownedField
+	}{
+		{"plain field", `{"f:spec":{"f:containers":{"k:{\"name\":\"podinfo\"}":{"f:image":{}}}}}`,
+			[]ownedField{{"spec.containers[name=podinfo].image", "podinfo:6.15.0"}}},
+		{"list item picked by two keys, sorted", `{"f:spec":{"f:containers":{"k:{\"name\":\"podinfo\"}":{"f:ports":{"k:{\"protocol\":\"TCP\",\"containerPort\":9898}":{".":{},"f:containerPort":{}}}}}}}`,
+			[]ownedField{{"spec.containers[name=podinfo].ports[containerPort=9898,protocol=TCP]", map[string]any{"containerPort": float64(9898), "protocol": "TCP"}}}},
+		{"set member", `{"f:metadata":{"f:finalizers":{".":{},"v:\"example.com/cleanup\"":{}}}}`,
+			[]ownedField{{`metadata.finalizers["example.com/cleanup"]`, json.RawMessage(`"example.com/cleanup"`)}}},
+		{"node owned with no subfields", `{"f:metadata":{"f:labels":{".":{}}}}`,
+			[]ownedField{{"metadata.labels", map[string]any{"team": "sre"}}}},
+		{"owned field missing from the live object", `{"f:spec":{"f:replicas":{}}}`,
+			[]ownedField{{"spec.replicas", nil}}},
+		{"unrecognized keys are skipped", `{"i:0":{},".":{}}`, nil},
+	}
+	for _, tc := range tests {
+		var fields map[string]any
+		if err := json.Unmarshal([]byte(tc.fields), &fields); err != nil {
+			t.Fatalf("%s: bad test input: %v", tc.name, err)
+		}
+		if got := ownedFields(fields, "", live); !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("%s:\n got %#v\nwant %#v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestFormatDriftReport(t *testing.T) {
+	now := time.Date(2026, 10, 26, 23, 0, 0, 0, time.UTC)
+	edited := now.Add(-4 * time.Minute)
+	st := AppStatus{Sync: "OutOfSync", Health: "Healthy", Revision: "abc123", Resources: []ResourceStatus{
+		{Kind: "Deployment", Name: "demo-app", Status: "OutOfSync"},
+		{Kind: "Service", Name: "demo-app", Status: "Synced"},
+	}}
+	changes := []LiveChange{
+		{Resource: "Deployment/demo-app", Field: "spec.replicas", Value: "3", Manager: "kubectl", Subresource: "scale"},
+		{Resource: "Deployment/demo-app", Field: "spec.template.spec.containers[name=podinfo].resources.limits.memory",
+			Value: `"256Mi"`, Manager: "kubectl-edit", Time: &edited},
+	}
+	diff := "===== apps/Deployment demo/demo-app ======\n<   replicas: 3\n---\n>   replicas: 2\n"
+
+	got := formatDriftReport(st, changes, diff, now)
+	for _, want := range []string{
+		"sync=OutOfSync, health=Healthy, comparing against Git revision abc123",
+		"  Deployment/demo-app: OutOfSync\n  Service/demo-app: Synced",
+		"  Deployment/demo-app\n    spec.replicas = 3", // grouped under the resource, listed once
+		"via the scale subresource, time not recorded",
+		`limits.memory = "256Mi"`,
+		"4m ago",
+		"<   replicas: 3",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("report missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Count(got, "  Deployment/demo-app\n") != 1 {
+		t.Errorf("resource header should appear once:\n%s", got)
+	}
+
+	empty := formatDriftReport(AppStatus{Sync: "Synced", Health: "Healthy"}, nil, "", now)
+	for _, want := range []string{"none: every field is owned by ArgoCD", "no differences."} {
+		if !strings.Contains(empty, want) {
+			t.Errorf("empty report missing %q:\n%s", want, empty)
+		}
 	}
 }

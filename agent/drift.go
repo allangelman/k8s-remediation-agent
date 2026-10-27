@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"sort"
@@ -100,24 +101,32 @@ func liveChanges(resource string, obj []byte) ([]LiveChange, error) {
 		if slices.Contains(systemManagers, mf.Manager) || mf.Subresource == "status" {
 			continue
 		}
-		walkFields(mf.FieldsV1, "", live, func(field string, value any) {
-			v, _ := json.Marshal(value)
+		for _, f := range ownedFields(mf.FieldsV1, "", live) {
+			v, _ := json.Marshal(f.Value)
 			changes = append(changes, LiveChange{
-				Resource: resource, Field: field, Value: string(v),
+				Resource: resource, Field: f.Path, Value: string(v),
 				Manager: mf.Manager, Subresource: mf.Subresource, Time: mf.Time,
 			})
-		})
+		}
 	}
 	sort.SliceStable(changes, func(i, j int) bool { return changes[i].Field < changes[j].Field })
 	return changes, nil
 }
 
-// walkFields walks a managedFields fieldsV1 tree alongside the live object
-// and calls emit for each owned leaf field. In fieldsV1, "f:<name>" is a field,
-// "k:{...}" is a list item picked by its keys (e.g. a container by name),
-// "v:<value>" is a set member, and "." means the node itself is owned. An
-// owned list item (e.g. an env var someone added) is reported as one change.
-func walkFields(fields map[string]any, path string, live any, emit func(field string, value any)) {
+// ownedField is one field a manager owns: its path and its live value.
+type ownedField struct {
+	Path  string // e.g. "spec.template.spec.containers[name=podinfo].image"
+	Value any    // the live value, or nil if the live object doesn't have it
+}
+
+// ownedFields walks a managedFields fieldsV1 tree (the fields one manager
+// owns) alongside the live object, and returns each owned leaf field with its
+// live value. In fieldsV1, "f:<name>" is a field, "k:{...}" is a list item
+// picked by its keys (e.g. a container by name), "v:<value>" is a set member,
+// and "." means the node itself is owned. An owned list item (e.g. an env var
+// someone added) is returned as one field rather than one per subfield.
+func ownedFields(fields map[string]any, path string, live any) []ownedField {
+	var out []ownedField
 	keys := make([]string, 0, len(fields))
 	for k := range fields {
 		keys = append(keys, k)
@@ -152,11 +161,12 @@ func walkFields(fields map[string]any, path string, live any, emit func(field st
 		child, _ := fields[key].(map[string]any)
 		_, ownsNode := child["."]
 		if len(child) == 0 || (ownsNode && (len(child) == 1 || strings.HasPrefix(key, "k:"))) {
-			emit(p, v)
+			out = append(out, ownedField{p, v})
 			continue
 		}
-		walkFields(child, p, v, emit)
+		out = append(out, ownedFields(child, p, v)...)
 	}
+	return out
 }
 
 // selector formats list-item keys like name=podinfo, sorted for stable output.
@@ -216,38 +226,16 @@ func (c Config) GetLiveChanges(ctx context.Context, resources []ResourceStatus) 
 // diffAgainstGit returns ArgoCD's own diff of the live objects against Git:
 // the same diff the ArgoCD UI shows, and the one ArgoCD uses to decide the app
 // is OutOfSync. `argocd app diff --core` computes it from the cluster directly,
-// with no ArgoCD login. Core mode reads ArgoCD's settings from the kube
-// context's namespace, and has no flag for it, so this runs it with a
-// temporary kubeconfig: cfg's context, with the namespace set to argocd.
+// with no ArgoCD login.
 func (c Config) diffAgainstGit(ctx context.Context) (string, error) {
-	kubeconfig, err := c.kubectl(ctx, "config", "view", "--raw", "--minify")
+	kubeconfig, cleanup, err := c.argocdKubeconfig(ctx)
 	if err != nil {
 		return "", err
 	}
-	f, err := os.CreateTemp("", "agent-kubeconfig-") // 0600: it holds the cluster credentials
-	if err != nil {
-		return "", err
-	}
-	defer os.Remove(f.Name())
-	_, err = f.WriteString(kubeconfig)
-	if cerr := f.Close(); err == nil {
-		err = cerr
-	}
-	if err != nil {
-		return "", err
-	}
-	// use-context fails if the minified config somehow isn't for cfg's context.
-	for _, args := range [][]string{
-		{"config", "use-context", c.KubeContext},
-		{"config", "set-context", "--current", "--namespace", "argocd"},
-	} {
-		if _, err := run(ctx, "kubectl", append([]string{"--kubeconfig", f.Name()}, args...)...); err != nil {
-			return "", err
-		}
-	}
+	defer cleanup()
 
 	cmd := exec.CommandContext(ctx, "argocd", "app", "diff", c.App, "--core")
-	cmd.Env = append(os.Environ(), "KUBECONFIG="+f.Name())
+	cmd.Env = append(os.Environ(), "KUBECONFIG="+kubeconfig)
 	out, err := cmd.CombinedOutput()
 	// argocd app diff exits 1 when there are differences, and 2 on errors.
 	var exitErr *exec.ExitError
@@ -260,6 +248,58 @@ func (c Config) diffAgainstGit(ctx context.Context) (string, error) {
 	return "", nil
 }
 
+// argocdKubeconfig returns a KUBECONFIG value for running the argocd CLI in
+// core mode against cfg's context. Core mode reads ArgoCD's settings from the
+// context's namespace and has no flag for it, so this writes a small kubeconfig
+// with one context: cfg's cluster and user, with the namespace set to argocd.
+// It's listed first in KUBECONFIG, ahead of the user's own kubeconfig, which
+// supplies the cluster and user entries. So the temporary file holds names
+// only, never credentials. cleanup removes it.
+func (c Config) argocdKubeconfig(ctx context.Context) (kubeconfig string, cleanup func(), err error) {
+	// Names of the cluster and user entries behind cfg's context. Without
+	// --raw, kubectl redacts credentials, though only names are read here.
+	names, err := c.kubectl(ctx, "config", "view", "--minify", "-o",
+		"jsonpath={.contexts[0].name} {.contexts[0].context.cluster} {.contexts[0].context.user}")
+	if err != nil {
+		return "", nil, err
+	}
+	fields := strings.Fields(names)
+	if len(fields) != 3 || fields[0] != c.KubeContext {
+		return "", nil, fmt.Errorf("can't find kube context %q (got %q)", c.KubeContext, names)
+	}
+	// JSON is valid YAML, so this is a kubeconfig file.
+	overlay, _ := json.Marshal(map[string]any{
+		"apiVersion": "v1", "kind": "Config", "current-context": "k8s-remediation-agent-argocd",
+		"contexts": []map[string]any{{"name": "k8s-remediation-agent-argocd", "context": map[string]string{
+			"cluster": fields[1], "user": fields[2], "namespace": "argocd",
+		}}},
+	})
+	f, err := os.CreateTemp("", "agent-kubeconfig-")
+	if err != nil {
+		return "", nil, err
+	}
+	cleanup = func() { os.Remove(f.Name()) }
+	_, err = f.Write(overlay)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		cleanup()
+		return "", nil, err
+	}
+
+	base := os.Getenv("KUBECONFIG")
+	if base == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			cleanup()
+			return "", nil, err
+		}
+		base = filepath.Join(home, ".kube", "config")
+	}
+	return f.Name() + string(os.PathListSeparator) + base, cleanup, nil
+}
+
 // driftReport is the get_drift tool's output: ArgoCD's view, who changed
 // what (managedFields), and the diff against Git.
 func (c Config) driftReport(ctx context.Context) (string, error) {
@@ -267,21 +307,31 @@ func (c Config) driftReport(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	changes, err := c.GetLiveChanges(ctx, st.Resources)
+	if err != nil {
+		return "", err
+	}
+	diff, err := c.diffAgainstGit(ctx)
+	if err != nil {
+		return "", err
+	}
+	return formatDriftReport(st, changes, diff, time.Now()), nil
+}
+
+// formatDriftReport formats get_drift's output. It's separate from
+// driftReport, which gathers the inputs from the cluster, so it can be tested.
+func formatDriftReport(st AppStatus, changes []LiveChange, diff string, now time.Time) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "ArgoCD: sync=%s, health=%s, comparing against Git revision %s\n", st.Sync, st.Health, st.Revision)
 	for _, r := range st.Resources {
 		fmt.Fprintf(&b, "  %s/%s: %s\n", r.Kind, r.Name, r.Status)
 	}
 
-	changes, err := c.GetLiveChanges(ctx, st.Resources)
-	if err != nil {
-		return "", err
-	}
 	b.WriteString("\nLive fields last written by something other than ArgoCD (from metadata.managedFields):\n")
 	if len(changes) == 0 {
 		b.WriteString("  none: every field is owned by ArgoCD or Kubernetes' own controllers.\n")
 	}
-	now, resource := time.Now(), ""
+	resource := ""
 	for _, ch := range changes {
 		if ch.Resource != resource {
 			resource = ch.Resource
@@ -290,10 +340,6 @@ func (c Config) driftReport(ctx context.Context) (string, error) {
 		fmt.Fprintf(&b, "    %s\n", ch.Describe(now))
 	}
 
-	diff, err := c.diffAgainstGit(ctx)
-	if err != nil {
-		return "", err
-	}
 	b.WriteString("\nArgoCD's diff of live objects against Git ('<' is live, '>' is what Git would set):\n")
 	if diff == "" {
 		b.WriteString("  no differences.\n")
@@ -302,5 +348,5 @@ func (c Config) driftReport(ctx context.Context) (string, error) {
 	}
 	b.WriteString("\nArgoCD only compares fields that Git declares, so a field added live (e.g. a new env var) " +
 		"can be listed above while ArgoCD still reports Synced.\n")
-	return b.String(), nil
+	return b.String()
 }
