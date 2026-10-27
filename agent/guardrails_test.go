@@ -3,6 +3,7 @@ package agent
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestGuardrails(t *testing.T) {
@@ -41,6 +42,34 @@ func TestDecideOutcome(t *testing.T) {
 	for _, tc := range tests {
 		if got := decideOutcome(tc.d, tc.a).Status; got != tc.want {
 			t.Errorf("%s: got %s, want %s", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestCheckPersonEdits(t *testing.T) {
+	now := time.Date(2026, 10, 26, 23, 0, 0, 0, time.UTC)
+	at := func(d time.Duration) *time.Time { t := now.Add(-d); return &t }
+	const cooldown = 30 * time.Minute
+
+	tests := []struct {
+		name    string
+		changes []LiveChange
+		blocked bool
+	}{
+		{"no live changes", nil, false},
+		{"automation, just now", []LiveChange{{Manager: "legacy-tuner", Time: at(time.Second)}}, false},
+		{"person, an hour ago", []LiveChange{{Manager: "kubectl-edit", Time: at(time.Hour)}}, false},
+		{"person, 5 minutes ago", []LiveChange{{Manager: "kubectl-edit", Time: at(5 * time.Minute)}}, true},
+		{"person, time not recorded (kubectl scale)", []LiveChange{{Manager: "kubectl", Subresource: "scale"}}, true},
+		{"automation plus a recent person", []LiveChange{
+			{Manager: "legacy-tuner", Time: at(time.Second)},
+			{Manager: "kubectl-set", Time: at(2 * time.Minute)},
+		}, true},
+	}
+	for _, tc := range tests {
+		err := checkPersonEdits(tc.changes, now, cooldown)
+		if (err != nil) != tc.blocked {
+			t.Errorf("%s: got %v, want blocked=%t", tc.name, err, tc.blocked)
 		}
 	}
 }
