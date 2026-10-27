@@ -129,6 +129,16 @@ func readOnlyTools(cfg Config) []Tool {
 					"origin/"+cfg.EnvBranch, "--", "apps/")
 			},
 		},
+		{
+			Name: "get_drift",
+			Description: "How the live objects differ from Git, and who changed them: ArgoCD's sync status per resource, " +
+				"every live field last written by something other than ArgoCD (from managedFields: which tool and when), " +
+				"and a diff of the live objects against the manifests in Git. Use this when the app is OutOfSync " +
+				"or you suspect a change made outside Git.",
+			Run: func(ctx context.Context, _ json.RawMessage) (string, error) {
+				return cfg.driftReport(ctx)
+			},
+		},
 	}
 }
 

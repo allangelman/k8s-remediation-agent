@@ -15,7 +15,8 @@ func TestParseAppStatus(t *testing.T) {
 	data := `{"status":{
 		"sync":{"status":"Synced","revision":"rev7"},
 		"health":{"status":"Degraded","message":"Deployment has exceeded its progress deadline"},
-		"history":[` + strings.Join(history, ",") + `]}}`
+		"history":[` + strings.Join(history, ",") + `],
+		"resources":[{"kind":"Deployment","name":"demo-app","namespace":"demo","status":"OutOfSync"}]}}`
 
 	st, err := parseAppStatus([]byte(data))
 	if err != nil {
@@ -29,6 +30,10 @@ func TestParseAppStatus(t *testing.T) {
 	}
 	if len(st.History) != 5 || st.History[0].Revision != "rev3" || st.History[4].Revision != "rev7" {
 		t.Errorf("history = %+v; want rev3..rev7", st.History)
+	}
+
+	if len(st.Resources) != 1 || st.Resources[0] != (ResourceStatus{"Deployment", "demo-app", "demo", "OutOfSync"}) {
+		t.Errorf("resources = %+v", st.Resources)
 	}
 
 	if _, err := parseAppStatus([]byte("not json")); err == nil {

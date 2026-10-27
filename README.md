@@ -125,7 +125,8 @@ flowchart LR
 
 1. **Observe:** read the ArgoCD app status and turn it into an alert.
 2. **Investigate:** Claude calls read-only tools: ArgoCD status, pods, events,
-   logs, the Deployment, and the deploy branch's recent commits with diffs.
+   logs, the Deployment, the deploy branch's recent commits with diffs, and
+   drift (`get_drift`, below).
 3. **Act:** if the evidence shows a recent commit caused the problem, Claude
    requests `revert_commit`, which passes through the guardrails below before
    anything changes.
@@ -143,6 +144,28 @@ says:
 | `RESOLVED`  | An action was applied and recovery was verified | 0 |
 | `PROPOSED`  | Dry run: a valid action was planned but not applied | 0 |
 | `ESCALATED` | The agent couldn't fix it, wasn't confident, or the fix didn't work | 2 |
+
+### Drift: who changed what outside Git
+
+The agent starts when the app is Degraded **or** OutOfSync. OutOfSync means
+the live objects no longer match Git, e.g. after someone runs `kubectl edit`.
+`get_drift` shows the agent what an on-call engineer would look at:
+
+- ArgoCD's sync status per resource
+- every live field last written by something other than ArgoCD, read from
+  the object's `metadata.managedFields`: which tool wrote it (`kubectl-edit`,
+  `kubectl-set`, a script's own field manager, ...) and when
+- ArgoCD's own diff of the live objects against Git (`argocd app diff --core`,
+  the same diff as the ArgoCD UI)
+
+A `kubectl*` field manager means a person most likely made the change, which
+might be a deliberate emergency fix, so the agent doesn't undo it.
+
+Two things found by testing on the cluster: `kubectl scale` records no
+timestamp (it writes through the `scale` subresource), and ArgoCD only compares
+fields Git declares, so a field added live (say, a new env var) leaves the app
+Synced. `get_drift` lists such fields anyway, but nothing starts the agent for
+them.
 
 ## Guardrails
 
@@ -208,8 +231,9 @@ reports **Synced but Degraded**: the cluster matches Git, but Git is wrong. Self
 
 ## Quick start
 
-Prerequisites: Docker, [kind](https://kind.sigs.k8s.io/), `kubectl`, Go, and an
-Anthropic API key in `ANTHROPIC_API_KEY`.
+Prerequisites: Docker, [kind](https://kind.sigs.k8s.io/), `kubectl`, the
+[`argocd` CLI](https://argo-cd.readthedocs.io/en/stable/cli_installation/)
+(used by `get_drift`), Go, and an Anthropic API key in `ANTHROPIC_API_KEY`.
 
 ```sh
 make up                       # kind cluster + ArgoCD + demo app (~1.5 min)
