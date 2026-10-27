@@ -71,25 +71,6 @@ func TestLiveChanges(t *testing.T) {
 	}
 }
 
-func TestCleanDiff(t *testing.T) {
-	raw := "diff -u -N /tmp/LIVE-1/apps.v1.Deployment.demo.demo-app /tmp/MERGED-2/apps.v1.Deployment.demo.demo-app\n" +
-		"--- /tmp/LIVE-1/apps.v1.Deployment.demo.demo-app\t2026-10-26 19:01:13\n" +
-		"+++ /tmp/MERGED-2/apps.v1.Deployment.demo.demo-app\t2026-10-26 19:01:13\n" +
-		"@@ -2,12 +2,11 @@\n" +
-		"     kubectl.kubernetes.io/last-applied-configuration: |\n" +
-		"       {\"apiVersion\":\"apps/v1\"}\n" +
-		"-  replicas: 3\n" +
-		"+  replicas: 2"
-	want := "--- live apps.v1.Deployment.demo.demo-app\n" +
-		"+++ git apps.v1.Deployment.demo.demo-app\n" +
-		"@@ -2,12 +2,11 @@\n" +
-		"-  replicas: 3\n" +
-		"+  replicas: 2"
-	if got := cleanDiff(raw); got != want {
-		t.Errorf("cleanDiff() =\n%s\nwant\n%s", got, want)
-	}
-}
-
 func TestLiveChangeDescribe(t *testing.T) {
 	ts := time.Date(2026, 10, 26, 22, 50, 0, 0, time.UTC)
 	now := ts.Add(4 * time.Minute)

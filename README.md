@@ -155,7 +155,8 @@ the live objects no longer match Git, e.g. after someone runs `kubectl edit`.
 - every live field last written by something other than ArgoCD, read from
   the object's `metadata.managedFields`: which tool wrote it (`kubectl-edit`,
   `kubectl-set`, a script's own field manager, ...) and when
-- `kubectl diff` of the live objects against the manifests in Git
+- ArgoCD's own diff of the live objects against Git (`argocd app diff --core`,
+  the same diff as the ArgoCD UI)
 
 A `kubectl*` field manager means a person most likely made the change, which
 might be a deliberate emergency fix, so the agent doesn't undo it.
@@ -230,8 +231,9 @@ reports **Synced but Degraded**: the cluster matches Git, but Git is wrong. Self
 
 ## Quick start
 
-Prerequisites: Docker, [kind](https://kind.sigs.k8s.io/), `kubectl`, Go, and an
-Anthropic API key in `ANTHROPIC_API_KEY`.
+Prerequisites: Docker, [kind](https://kind.sigs.k8s.io/), `kubectl`, the
+[`argocd` CLI](https://argo-cd.readthedocs.io/en/stable/cli_installation/)
+(used by `get_drift`), Go, and an Anthropic API key in `ANTHROPIC_API_KEY`.
 
 ```sh
 make up                       # kind cluster + ArgoCD + demo app (~1.5 min)

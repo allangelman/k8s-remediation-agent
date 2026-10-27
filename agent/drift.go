@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"reflect"
 	"slices"
 	"sort"
@@ -214,72 +213,51 @@ func (c Config) GetLiveChanges(ctx context.Context, resources []ResourceStatus) 
 	return all, nil
 }
 
-// diffAgainstGit runs `kubectl diff` with the app's manifests from the deploy
-// branch: what applying Git would change on the live objects. kubectl diff is
-// read-only (it uses a server-side dry run).
+// diffAgainstGit returns ArgoCD's own diff of the live objects against Git:
+// the same diff the ArgoCD UI shows, and the one ArgoCD uses to decide the app
+// is OutOfSync. `argocd app diff --core` computes it from the cluster directly,
+// with no ArgoCD login. Core mode reads ArgoCD's settings from the kube
+// context's namespace, and has no flag for it, so this runs it with a
+// temporary kubeconfig: cfg's context, with the namespace set to argocd.
 func (c Config) diffAgainstGit(ctx context.Context) (string, error) {
-	ref, dir := "origin/"+c.EnvBranch, "apps/"+c.App
-	if _, err := git(ctx, c.RepoDir, "fetch", "-q", "origin", c.EnvBranch); err != nil {
-		return "", err
-	}
-	files, err := git(ctx, c.RepoDir, "ls-tree", "--name-only", ref+":"+dir)
+	kubeconfig, err := c.kubectl(ctx, "config", "view", "--raw", "--minify")
 	if err != nil {
 		return "", err
 	}
-	tmp, err := os.MkdirTemp("", "agent-diff-")
+	f, err := os.CreateTemp("", "agent-kubeconfig-") // 0600: it holds the cluster credentials
 	if err != nil {
 		return "", err
 	}
-	defer os.RemoveAll(tmp)
-	for _, f := range strings.Fields(files) {
-		if !strings.HasSuffix(f, ".yaml") && !strings.HasSuffix(f, ".yml") {
-			continue
-		}
-		content, err := git(ctx, c.RepoDir, "show", ref+":"+dir+"/"+f)
-		if err != nil {
-			return "", err
-		}
-		if err := os.WriteFile(filepath.Join(tmp, f), []byte(content+"\n"), 0o600); err != nil {
+	defer os.Remove(f.Name())
+	_, err = f.WriteString(kubeconfig)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return "", err
+	}
+	// use-context fails if the minified config somehow isn't for cfg's context.
+	for _, args := range [][]string{
+		{"config", "use-context", c.KubeContext},
+		{"config", "set-context", "--current", "--namespace", "argocd"},
+	} {
+		if _, err := run(ctx, "kubectl", append([]string{"--kubeconfig", f.Name()}, args...)...); err != nil {
 			return "", err
 		}
 	}
 
-	out, err := exec.CommandContext(ctx, "kubectl", "--context", c.KubeContext, "-n", c.Namespace, "diff", "-f", tmp).CombinedOutput()
-	// kubectl diff exits 1 when there are differences, and >1 on errors.
+	cmd := exec.CommandContext(ctx, "argocd", "app", "diff", c.App, "--core")
+	cmd.Env = append(os.Environ(), "KUBECONFIG="+f.Name())
+	out, err := cmd.CombinedOutput()
+	// argocd app diff exits 1 when there are differences, and 2 on errors.
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
-		return cleanDiff(string(out)), nil
+		return string(out), nil
 	}
 	if err != nil {
-		return "", fmt.Errorf("kubectl diff: %w: %s", err, out)
+		return "", fmt.Errorf("argocd app diff (needs the argocd CLI): %w: %s", err, out)
 	}
 	return "", nil
-}
-
-// cleanDiff trims kubectl diff output for the model: temp-file paths become
-// "live <object>" and "git <object>", and the last-applied-configuration
-// annotation (a long JSON copy of an earlier apply) is dropped.
-func cleanDiff(diff string) string {
-	var out []string
-	lines := strings.Split(diff, "\n")
-	for i := 0; i < len(lines); i++ {
-		line := lines[i]
-		object := line[strings.LastIndex(line, "/")+1:]
-		object, _, _ = strings.Cut(object, "\t")
-		switch {
-		case strings.HasPrefix(line, "diff -u"):
-			continue
-		case strings.HasPrefix(line, "--- "):
-			out = append(out, "--- live "+object)
-		case strings.HasPrefix(line, "+++ "):
-			out = append(out, "+++ git "+object)
-		case strings.Contains(line, "kubectl.kubernetes.io/last-applied-configuration"):
-			i++ // the annotation's value is on the next line
-		default:
-			out = append(out, line)
-		}
-	}
-	return strings.Join(out, "\n")
 }
 
 // driftReport is the get_drift tool's output: ArgoCD's view, who changed
@@ -316,11 +294,10 @@ func (c Config) driftReport(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	b.WriteString("\nDiff of live objects against Git (kubectl diff; '-' is live, '+' is what Git would set):\n")
+	b.WriteString("\nArgoCD's diff of live objects against Git ('<' is live, '>' is what Git would set):\n")
 	if diff == "" {
 		b.WriteString("  no differences.\n")
 	} else {
-		b.WriteString("Note: ArgoCD's tracking-id annotation and metadata.generation always differ; ignore them.\n")
 		b.WriteString(diff)
 	}
 	b.WriteString("\nArgoCD only compares fields that Git declares, so a field added live (e.g. a new env var) " +
