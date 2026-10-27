@@ -1,0 +1,44 @@
+
+[1m── OBSERVE[0m  reading ArgoCD status for "demo-app"
+ALERT: ArgoCD reports application "demo-app" (namespace "demo") as sync=OutOfSync, health=Degraded. Investigate, and fix it if you can do so safely.
+
+[1m── SETUP[0m  what Claude may request (Claude only asks; this code runs each request)
+   read-only tools: get_app_status, list_pods, describe_pod, describe_deployment, get_events, get_pod_logs, get_deploy_history, get_drift
+   actions:         revert_commit, sync_app (at most 1 per incident, checked by guardrails)
+   to finish:       submit_diagnosis
+
+[1m── STEP 1/15[0m  sending the conversation to Claude (1 message)
+   Claude replied in 2.7s (stop_reason: tool_use; 2987 tokens in, 95 out)
+   Claude: I'll start by checking app status, pods, and drift together.
+[36m   → get_app_status[0m
+[36m   → list_pods[0m
+[36m   → get_drift[0m
+   3 tool results go back to Claude in the next step
+
+[1m── STEP 2/15[0m  sending the conversation to Claude (3 messages)
+   Claude replied in 2.0s (stop_reason: tool_use; 4799 tokens in, 91 out)
+   Claude: Drift by automation set memory to 8Mi; confirming the crash is OOM.
+[36m   → describe_pod {"name":"demo-app-797c599d7-s8csz"}[0m
+   1 tool result go back to Claude in the next step
+
+[1m── STEP 3/15[0m  sending the conversation to Claude (5 messages)
+   Claude replied in 4.7s (stop_reason: tool_use; 6268 tokens in, 285 out)
+[2m   [thinking] This confirms OOMKilled, so the drift came from automation rather than Git, which correctly has the 128Mi/64Mi values. Double-checking the latest commit shows Git's config is fine, so syncing is the right move.[0m
+[2m   [thinking] I found the pod is being OOMKilled due to an 8Mi memory limit set by automated "legacy-tuner" rather than a person, while Git still has the correct values (128Mi/64Mi). I'll sync the app back to the Git-defined configuration.[0m
+
+[1m── ACT[0m  Claude requested [35msync_app {"reason":"Automation \"legacy-tuner\" changed the live podinfo memory limit/request to 8Mi outside Git, causing OOMKilled CrashLoopBackOff; Git holds the correct 128Mi/64Mi."}[0m; the code checks it before anything changes
+   1. guardrails: passed (allowlisted, within the 1-action limit)
+[32m   2. validate:   🛡 allowed: sync demo-app to Git revision ba52acc (overwriting spec.template.spec.containers[name=podinfo].resources.limits.memory by legacy-tuner, spec.template.spec.containers[name=podinfo].resources.requests.memory by legacy-tuner)[0m
+   3. apply:      started an ArgoCD sync (target revision ba52acc)
+   4. verify:     waiting up to 2m0s for ArgoCD to report Synced/Healthy at ba52acc...
+[32m      ✓ recovered after 3s: Synced/Healthy at ba52acc[0m
+   1 tool result go back to Claude in the next step
+
+[1m── STEP 4/15[0m  sending the conversation to Claude (7 messages)
+   Claude replied in 6.8s (stop_reason: tool_use; 6709 tokens in, 649 out)
+
+[1m── REPORT[0m  Claude called submit_diagnosis: category config_drift, suspect commit , confidence high, needs human true
+
+[1m── OUTCOME[0m  decided by the code from what happened, not by Claude: RESOLVED (action applied and recovery verified)
+
+Tokens: 20763 in, 1120 out
