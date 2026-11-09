@@ -89,7 +89,7 @@ func printOutcome(o *agent.Outcome) {
 	if a := o.Action; a != nil {
 		fmt.Printf("Action:         %s\n", a.Summary)
 		if a.Revision != "" {
-			fmt.Printf("Pushed:         %s\n", a.Revision)
+			fmt.Printf("Revision:       %s\n", a.Revision)
 		}
 	}
 	d := o.Diagnosis
