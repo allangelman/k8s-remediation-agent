@@ -160,8 +160,12 @@ func Run(ctx context.Context, cfg Config, client anthropic.Client, audit *AuditL
 						return nil, fmt.Errorf("parse diagnosis: %w", err)
 					}
 					audit.Write("diagnosis", map[string]any{"step": step, "diagnosis": d})
-					stage(out, "REPORT", "Claude called %s: category %s, suspect commit %.7s, confidence %s, needs human %t",
-						submitDiagnosisTool, d.Category, d.SuspectCommit, d.Confidence, d.NeedsHuman)
+					suspect := ""
+					if d.SuspectCommit != "" {
+						suspect = fmt.Sprintf(", suspect commit %.7s", d.SuspectCommit)
+					}
+					stage(out, "REPORT", "Claude called %s: category %s%s, confidence %s, needs human %t",
+						submitDiagnosisTool, d.Category, suspect, d.Confidence, d.NeedsHuman)
 					cfg.progress("step %d (%.0fs): %s → %s, suspect %.7s", step, time.Since(start).Seconds(),
 						submitDiagnosisTool, d.Category, d.SuspectCommit)
 					return finish(audit, out, decideOutcome(&d, action)), nil
@@ -181,7 +185,11 @@ func Run(ctx context.Context, cfg Config, client anthropic.Client, audit *AuditL
 
 		if resp.StopReason == anthropic.BetaStopReasonToolUse {
 			// All results go back in a single user message.
-			fmt.Fprintf(out, "   %s go back to Claude in the next step\n", plural(len(results), "tool result"))
+			verb := "go"
+			if len(results) == 1 {
+				verb = "goes"
+			}
+			fmt.Fprintf(out, "   %s %s back to Claude in the next step\n", plural(len(results), "tool result"), verb)
 			cfg.progress("step %d (%.0fs): %s", step, time.Since(start).Seconds(), strings.Join(requested, ", "))
 			params.Messages = append(params.Messages, anthropic.NewBetaUserMessage(results...))
 			continue

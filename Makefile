@@ -57,13 +57,18 @@ argocd-ui: ## Port-forward the ArgoCD UI to http://localhost:8080 and print the 
 	@echo "Open http://localhost:8080. Ctrl-C to stop."
 	$(KUBECTL) -n argocd port-forward svc/argocd-server 8080:80
 
+# How long a fault target waits for the fault to show in ArgoCD. A working
+# fault turns Degraded about 60s in (the Deployment's progressDeadlineSeconds),
+# so 120s leaves headroom without hanging for minutes when a fault didn't land.
+FAULT_TIMEOUT ?= 120
+
 # Faults start with a reset so every run begins from main's history. Otherwise
 # earlier faults and the agent's reverts stay in demo-env's history, and the
 # agent (reasonably) treats a re-pushed change differently.
 define run_fault
 	@ENV_BRANCH=$(ENV_BRANCH) faults/$(1)
 	@$(MAKE) --no-print-directory refresh
-	@CONTEXT=$(CONTEXT) scripts/wait-for-app.sh Degraded
+	@CONTEXT=$(CONTEXT) scripts/wait-for-app.sh Degraded $(FAULT_TIMEOUT)
 endef
 
 break-image: reset ## Fault 1: push a nonexistent image tag (ImagePullBackOff)
@@ -80,7 +85,7 @@ break-oom: reset ## Fault 3: push a too-low memory limit (OOMKilled)
 define run_live_fault
 	@CONTEXT=$(CONTEXT) faults/$(1)
 	@$(MAKE) --no-print-directory refresh
-	@CONTEXT=$(CONTEXT) SYNC=OutOfSync scripts/wait-for-app.sh $(2)
+	@CONTEXT=$(CONTEXT) SYNC=OutOfSync scripts/wait-for-app.sh $(2) $(FAULT_TIMEOUT)
 endef
 
 break-drift: reset ## Fault 4: automation sets a too-low memory limit live (OOMKilled, OutOfSync)

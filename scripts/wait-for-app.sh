@@ -2,7 +2,7 @@
 # Wait until the demo-app ArgoCD Application has the given health status (e.g.
 # Healthy, Degraded) and sync status (Synced unless SYNC is set; the drift
 # faults wait for OutOfSync). If REVISION is set, also wait until ArgoCD
-# compares against that Git revision. Shared by `make up`, `make reset`, and
+# compares against that Git revision and has finished a sync at it. Shared by `make up`, `make reset`, and
 # the fault targets.
 #
 # Usage: CONTEXT=kind-remediation [SYNC=OutOfSync] [REVISION=<sha>] scripts/wait-for-app.sh <health> [timeout-seconds]
@@ -19,6 +19,14 @@ for ((elapsed = 0; elapsed < timeout; elapsed += 5)); do
   sync=$("${kubectl[@]}" get application demo-app -o jsonpath='{.status.sync.status}')
   health=$("${kubectl[@]}" get application demo-app -o jsonpath='{.status.health.status}')
   revision=$("${kubectl[@]}" get application demo-app -o jsonpath='{.status.sync.revision}')
+  # With REVISION set, also require a finished sync at that revision, not just
+  # a comparison: until ArgoCD has synced a revision once, auto-sync can still
+  # run on its own and undo a fault (see scripts/sync-drift.sh).
+  if [[ -n $want_revision ]]; then
+    phase=$("${kubectl[@]}" get application demo-app -o jsonpath='{.status.operationState.phase}')
+    last_synced=$("${kubectl[@]}" get application demo-app -o jsonpath='{.status.operationState.syncResult.revision}')
+    [[ $phase == Running || $last_synced != "$want_revision" ]] && revision="sync pending"
+  fi
   # Require the sync status as well as the health status. Synced means ArgoCD
   # has deployed the latest commit on demo-env, so the health we see belongs to
   # that commit and not to whatever was running before. The healthy state and
