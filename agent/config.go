@@ -26,6 +26,9 @@ type Config struct {
 	MaxActions     int           // blast-radius limit: mutating actions per incident
 	DryRun         bool          // validate and log actions, but don't apply them
 	VerifyTimeout  time.Duration // how long to wait for recovery after an action
+	// sync_app won't overwrite a field a person changed with kubectl more
+	// recently than this, or at an unrecorded time; see checkPersonEdits.
+	PersonEditCooldown time.Duration
 
 	AuditPath string // JSONL file every step is appended to
 

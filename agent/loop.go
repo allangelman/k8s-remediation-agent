@@ -260,7 +260,7 @@ func runAction(ctx context.Context, cfg Config, guard *Guardrails, a Action, pre
 		audit.Write("action_failed", map[string]any{"step": step, "action": rec})
 		return reply("Action failed: "+err.Error()+". No further actions are available. Call submit_diagnosis with needs_human=true.", true), rec, "apply failed"
 	}
-	fmt.Fprintf(out, "   3. apply:      pushed %.7s to %s\n", rev, cfg.EnvBranch)
+	fmt.Fprintf(out, "   3. apply:      %s (target revision %.7s)\n", plan.Applied, rev)
 	audit.Write("action_applied", map[string]any{"step": step, "action": rec})
 
 	// 4. Verify from the cluster's point of view, not the model's.

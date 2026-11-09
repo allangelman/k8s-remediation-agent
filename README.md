@@ -22,7 +22,7 @@ ALERT: ArgoCD reports application "demo-app" (namespace "demo") as sync=Synced, 
 
 ── SETUP  what Claude may request (Claude only asks; this code runs each request)
    read-only tools: get_app_status, list_pods, describe_pod, ... get_deploy_history
-   actions:         revert_commit (at most 1 per incident, checked by guardrails)
+   actions:         revert_commit, sync_app (at most 1 per incident, checked by guardrails)
    to finish:       submit_diagnosis
 
 ── STEP 1/15  sending the conversation to Claude (1 message)
@@ -39,7 +39,7 @@ ALERT: ArgoCD reports application "demo-app" (namespace "demo") as sync=Synced, 
 ── ACT  Claude requested revert_commit {"commit_sha":"c5bdeb21...","reason":"..."}; the code checks it before anything changes
    1. guardrails: passed (allowlisted, within the 1-action limit)
    2. validate:   🛡 allowed: revert c5bdeb2 ("Pin podinfo image to v6.15.0") on demo-env
-   3. apply:      pushed a13be5e to demo-env
+   3. apply:      pushed the revert to demo-env (target revision a13be5e)
    4. verify:     waiting up to 2m0s for ArgoCD to report Synced/Healthy at a13be5e...
       ✓ recovered after 3s: Synced/Healthy at a13be5e
 
@@ -80,7 +80,7 @@ flowchart LR
         loop["agent loop"]
         tools["read-only tools<br/>kubectl / git"]
         guard["guardrails<br/>allowlist · 1 action · validation · dry run"]
-        verify["verification<br/>Synced + Healthy at revert"]
+        verify["verification<br/>Synced + Healthy at target revision"]
         audit[("audit log<br/>JSONL")]
     end
 
@@ -102,6 +102,7 @@ flowchart LR
     loop --> guard
     tools -. "inspect" .-> app
     guard -- "revert_commit<br/>(git push)" --> env
+    guard -- "sync_app<br/>(ArgoCD sync)" --> argo
     guard --> verify
     verify -. "poll status" .-> argo
 
@@ -117,9 +118,12 @@ flowchart LR
   `make reset` force-reset `demo-env` to `main`.
 - **Claude never touches the cluster.** It can only *request* tool calls; the
   Go code decides whether and how to run them.
-- **Remediation is a `git revert`,** not an ArgoCD rollback. Git stays the
-  source of truth, ArgoCD auto-sync deploys the fix, and the fix shows up in
-  history, authored by `k8s-remediation-agent` with the reason in the message.
+- **A bad commit is fixed with a `git revert`,** not an ArgoCD rollback. Git
+  stays the source of truth, ArgoCD auto-sync deploys the fix, and the fix
+  shows up in history, authored by `k8s-remediation-agent` with the reason in
+  the message.
+- **Drift made outside Git is fixed with an ArgoCD sync** back to Git. ArgoCD
+  records the agent as the initiator and its reason on the operation.
 
 ## How a run works
 
@@ -127,11 +131,13 @@ flowchart LR
 2. **Investigate:** Claude calls read-only tools: ArgoCD status, pods, events,
    logs, the Deployment, the deploy branch's recent commits with diffs, and
    drift (`get_drift`, below).
-3. **Act:** if the evidence shows a recent commit caused the problem, Claude
-   requests `revert_commit`, which passes through the guardrails below before
-   anything changes.
+3. **Act:** if a recent commit caused the problem, Claude requests
+   `revert_commit`; if a change made outside Git did (and Git is correct), it
+   requests `sync_app`. Either way the request passes through the guardrails
+   below before anything changes.
 4. **Verify:** the code (not the model) waits for ArgoCD to report the app
-   Synced and Healthy at the revert commit.
+   Synced and Healthy at the target revision (the revert commit, or the
+   revision it synced to).
 5. **Report:** Claude calls `submit_diagnosis` with a structured result:
    category, root cause, evidence, suspect commit, fix, confidence, and whether
    a human is needed.
@@ -174,15 +180,16 @@ Enforced in code, outside the model's control:
 | Guardrail | How |
 |-----------|-----|
 | **Fixed scope** | Cluster, namespace, app, and branch come from config; the model can't choose them. Pod names from the model are validated before reaching kubectl, and commands run without a shell. |
-| **Action allowlist** | Only `revert_commit` is enabled. Only allowlisted actions are offered to the model, and every call is checked again. |
+| **Action allowlist** | Only `revert_commit` and `sync_app` are enabled. Only allowlisted actions are offered to the model, and every call is checked again. |
 | **Blast-radius limit** | At most **one** action per incident. If it doesn't work, the agent escalates instead of trying something else. |
-| **Action validation** | A revert must be a full SHA, among the last 10 commits on `demo-env`, not a merge, change only `apps/`, and not already reverted (so it's safe to repeat). Checked before anything changes. |
+| **Action validation** | A revert must be a full SHA, among the last 10 commits on `demo-env`, not a merge, change only `apps/`, and not already reverted (so it's safe to repeat). A sync needs the app OutOfSync with no ArgoCD operation already running, and always goes to the revision ArgoCD already tracks; the model can't pick one. Checked before anything changes. |
+| **Recent changes by people** | `sync_app` refuses to overwrite a live field a person changed with kubectl (per `managedFields`) in the last 30 minutes, or at an unrecorded time, because it may be a deliberate fix. Drift from automation isn't blocked. |
 | **Safe apply** | The revert happens in a temporary worktree and is pushed without force, so it fails rather than overwriting a commit someone else just pushed. |
 | **Dry run** | `--dry-run` runs every check but stops before applying. The model reports the same decisions it would make live, so a dry run works as shadow mode. |
-| **Verification** | Success means ArgoCD reports Synced and Healthy at the revert commit within `--verify-timeout` (default 2m), not that the model says it's fixed. |
+| **Verification** | Success means ArgoCD reports Synced and Healthy at the target revision within `--verify-timeout` (default 2m), not that the model says it's fixed. |
 | **Audit log** | Every step goes to `audit/<timestamp>.jsonl`: model responses (with summarized reasoning), tool calls with full output, guardrail decisions, the action, verification, and the outcome. |
 
-The allowlist and action limit are deliberately not command-line flags:
+The allowlist, action limit, and 30-minute window are deliberately not command-line flags:
 widening what the agent may do should be a reviewed code change.
 
 The guardrails matter in practice. In one test, `demo-env` showed the agent
@@ -306,9 +313,6 @@ and enabling one action type at a time as the agent builds a track record.
   (for example, a failing dependency), so the correct outcome is to escalate
   without reverting. All current scenarios are fixable by reverting, which
   flatters the agent.
-- **Configuration drift and a `sync` action:** a manual `kubectl edit` leaves
-  the app OutOfSync; the fix is an ArgoCD sync, or escalation if the drift was
-  a deliberate emergency fix.
 - **`make watch`:** poll for Degraded and start the agent automatically,
   standing in for the alert.
 - **Expose the read-only tools as an MCP server,** so an on-call engineer can

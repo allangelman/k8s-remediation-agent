@@ -82,6 +82,7 @@ func main() {
 		RepoDir: ".", EnvBranch: "demo-env",
 		Model: *model, Effort: *effort, MaxSteps: 15,
 		AllowedActions: []string{"revert_commit"}, MaxActions: 1, VerifyTimeout: 2 * time.Minute,
+		PersonEditCooldown: 30 * time.Minute,
 	}
 	outDir := filepath.Join(*outRoot, time.Now().UTC().Format("20060102T150405Z"))
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
