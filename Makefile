@@ -10,7 +10,7 @@ ENV_BRANCH     := demo-env
 # Always target the kind cluster explicitly, never whatever context is current.
 KUBECTL := kubectl --context $(CONTEXT)
 
-.PHONY: help build test agent eval up down reset status argocd-ui break-image break-crash break-oom cluster argocd env-branch app refresh
+.PHONY: help build test agent eval up down reset status argocd-ui break-image break-crash break-oom break-drift break-manual break-hotfix cluster argocd env-branch app refresh
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-12s %s\n", $$1, $$2}'
@@ -38,8 +38,12 @@ up: cluster argocd env-branch app refresh ## Create the cluster, install ArgoCD,
 down: ## Delete the kind cluster
 	kind delete cluster --name $(CLUSTER)
 
-reset: env-branch refresh ## Undo any fault: reset demo-env to main and wait for Healthy
-	@CONTEXT=$(CONTEXT) scripts/wait-for-app.sh Healthy
+reset: env-branch refresh ## Undo any fault: reset demo-env to main, sync away live changes, wait for Healthy
+	@CONTEXT=$(CONTEXT) scripts/sync-drift.sh
+	@# Wait for ArgoCD to deploy main itself, not just to look Healthy: right
+	@# after a force-push, the app can still report the old revision as Synced
+	@# before auto-sync starts, and a drift fault injected then gets overwritten.
+	@CONTEXT=$(CONTEXT) REVISION=$$(git rev-parse origin/main) scripts/wait-for-app.sh Healthy
 
 status: ## Show the ArgoCD app state and demo pods
 	@$(KUBECTL) -n argocd get application demo-app \
@@ -70,6 +74,23 @@ break-crash: reset ## Fault 2: push a bad port setting (CrashLoopBackOff)
 
 break-oom: reset ## Fault 3: push a too-low memory limit (OOMKilled)
 	$(call run_fault,oom.sh)
+
+# Drift faults change the live objects directly, not Git, so ArgoCD reports
+# the app OutOfSync.
+define run_live_fault
+	@CONTEXT=$(CONTEXT) faults/$(1)
+	@$(MAKE) --no-print-directory refresh
+	@CONTEXT=$(CONTEXT) SYNC=OutOfSync scripts/wait-for-app.sh $(2)
+endef
+
+break-drift: reset ## Fault 4: automation sets a too-low memory limit live (OOMKilled, OutOfSync)
+	$(call run_live_fault,drift-automation.sh,Degraded)
+
+break-manual: reset ## Fault 5: a person sets a bad image tag with kubectl (OutOfSync)
+	$(call run_live_fault,manual-bad-image.sh,Degraded)
+
+break-hotfix: reset ## Fault 6: a person raises the memory limit with kubectl edit (OutOfSync, Healthy)
+	$(call run_live_fault,manual-hotfix.sh,Healthy)
 
 cluster:
 	@if kind get clusters | grep -qx $(CLUSTER); then \
